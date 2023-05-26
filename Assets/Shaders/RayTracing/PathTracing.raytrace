@@ -93,7 +93,7 @@ void PathTracingRayGenShader()
     g_Output[launchIndex] = float4(result, 1);
 
     //Debug
-    //g_Output[launchIndex] = g_Normal[launchIndex];
+    //g_Output[launchIndex] = g_DebugTex[launchIndex];
     //Debug done
 }
 
