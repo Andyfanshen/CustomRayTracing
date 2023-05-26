@@ -17,5 +17,9 @@ Path Tracing with Unity RayTracing Shader
 - Project-->Assets-->Scene-->CornellBox
 - Project-->Assets-->Scene-->ComplexBRDF
 
+# 工程导出
+- Project Settings-->Quality-->除`RayTracing`以外的Level全部删除
+- Edit-->File-->Build Settings-->点击`Add Open Scenes`-->点击`Build`
+
 ![cornellbox](https://github.com/Andyfanshen/CustomRayTracing/assets/33785908/6771aec0-c9db-45fd-b887-61dce9fd05ab)
 ![bike](https://github.com/Andyfanshen/CustomRayTracing/assets/33785908/d5ccd35f-bab4-4cbe-8105-cbb802036d99)
