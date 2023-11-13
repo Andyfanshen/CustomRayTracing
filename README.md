@@ -2,7 +2,7 @@
 Path Tracing with Unity RayTracing Shader
 
 ## Requirements
-- Unity URP Project (Recommend [Unity 2023.1 beta](https://unity3d.com/beta))
+- Unity URP Project (Recommend Unity 2023.1+)
 - Hardwares supported DXR (e.g. NVIDIA RTX serires)
 
 ## Quick Start
@@ -24,7 +24,7 @@ Path Tracing with Unity RayTracing Shader
 ---
 
 ## 基本环境
-- Unity URP工程（推荐[Unity 2023.1 beta](https://unity3d.com/beta)）
+- Unity URP工程（推荐 Unity 2023.1+）
 - 支持DX12硬件光追加速的显卡硬件（如RTX3080）
 
 ## 创建环境
