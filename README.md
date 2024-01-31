@@ -7,8 +7,8 @@ Path Tracing with Unity RayTracing Shader
 
 ## Quick Start
 - Create a pure 3D URP project
-- (In Editor) Edit-->Project Settings-->Other Settings-->Graphics APIs for Windows-->Click the '+' icon to add 'Direct3D12' API and drag it as the first one-->Restart Unity Editor to apply changes
-- (In Editor) Edit-->Project Settings-->Other Settings-->**Deselect** 'Static Batching'
+- (In Editor) Edit-->Project Settings-->Player-->Other Settings-->Graphics APIs for Windows-->Click the '+' icon to add 'Direct3D12' API and drag it as the first one-->Restart Unity Editor to apply changes
+- (In Editor) Edit-->Project Settings-->Player-->Other Settings-->**Deselect** 'Static Batching'
 - Replace the assets folder with this repo's
 - Project Settings-->Graphics-->Scriptable Render Pipeline Settings, Choose `RayTracing (Ray Tracing Render Pipeline Asset)`
 - Project Settings-->Quality-->Click `Add Quality Level`-->Select the new added Quality Level-->(Optional) Rename it to `RayTracing`-->Set **Render Pipeline Asset** with `RayTracing (Ray Tracing Render Pipeline Asset)`
