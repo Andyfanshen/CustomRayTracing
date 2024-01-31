@@ -69,6 +69,7 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	smoothness *= metallicSmoothness.w;
 #endif
 
+	smoothness = clamp(smoothness, 1e-6, 0.9999f);
 	float3 emission = float3(0, 0, 0);
 
 #if _EMISSION
@@ -111,22 +112,30 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 
 	float3 bounceRayDir = lerp(reflectionRayDir, refractionRayDir, doRefraction);
 #else
-	float roughness = 1.0 - smoothness;
+	float roughness = clamp(1.0 - smoothness, 1e-6, 0.9999f);
 
-	float fresnelFactor = FresnelReflectAmountOpaque(isFrontFace ? 1 : _IOR, isFrontFace ? _IOR : 1, WorldRayDirection(), worldNormal);
+	//float fresnelFactor = FresnelReflectAmountOpaque(isFrontFace ? 1 : _IOR, isFrontFace ? _IOR : 1, WorldRayDirection(), worldNormal);
 
 	float3 view = -WorldRayDirection();
-
-	float3 bounceRayDir; float pdf;
-
-	float3 specularColor = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
-
-	float3 fr = SampleBSDF(TBN, view, worldNormal, roughness, albedo, specularColor, smoothness, fresnelFactor,  bounceRayDir, pdf, payload.rngState);
-
-	float3 radiance = albedo;
-
-	if(dot(fr, fr) > 0 && pdf > 1e-6) radiance = fr * dot(bounceRayDir, worldNormal) / pdf;
+	float3 view_tangent = mul(TBN, view);
 	
+	float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+	float3 fresnel = FresnelSchlick(view, worldNormal, F0);
+
+    float3 bounceDir_tangent;
+	float3 radiance;
+	if(RandomFloat01(payload.rngState) < smoothness)
+	{// specular
+		radiance = EvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, payload.rngState);
+	}
+	else
+	{// diffuse
+		bounceDir_tangent = SampleCosineHemisphere(float3(0, 0, 1), payload.rngState);
+		radiance = albedo;
+	}
+
+	float3 bounceRayDir = mul(bounceDir_tangent, TBN);
+
 	uint bounceIndexOpaque = payload.bounceIndexOpaque + 1;
 
 	uint bounceIndexTransparent = payload.bounceIndexTransparent;
