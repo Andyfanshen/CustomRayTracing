@@ -29,7 +29,7 @@ Path Tracing with Unity RayTracing Shader
 
 ## 创建环境
 - 通过Unity Hub创建3D(URP)项目
-- 工程中选择 Edit-->Project Settings-->Other Settings-->Graphics APIs for Windows-->点击右下角`+`号添加`Direct3D12`，并将其拖拽至列表首位-->重启Unity编辑器
+- 工程中选择 Edit-->Project Settings-->Player-->Other Settings-->Graphics APIs for Windows-->点击右下角`+`号添加`Direct3D12`，并将其拖拽至列表首位-->重启Unity编辑器
 - Other Settings-->取消勾选`Static Batching`
 - 使用本仓库的Assets文件夹替换工程的Assets文件夹
 - Project Settings-->Graphics-->Scriptable Render Pipeline Settings选用`RayTracing (Ray Tracing Render Pipeline Asset)`
