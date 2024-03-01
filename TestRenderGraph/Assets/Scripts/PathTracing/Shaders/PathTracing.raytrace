@@ -1,0 +1,118 @@
+#ifndef RT_PATHTRACING
+#define RT_PATHTRACING
+
+#include "UnityShaderVariables.cginc"
+#include "includes/RayPayload.hlsl"
+#include "includes/Utils.hlsl"
+#include "includes/Global.hlsl"
+
+uint g_ConvergenceStep;
+uint g_FrameIndex;
+float g_Zoom;
+float g_AspectRatio;
+uint g_BounceCountOpaque;
+uint g_BounceCountTransparent;
+uint g_MaxSamples;
+
+TextureCube<float4> g_EnvTex;
+SamplerState sampler_g_EnvTex;
+
+#pragma max_recursion_depth 10
+
+[shader("raygeneration")]
+void PathTracingRayGenShader()
+{
+    uint2 launchIndex = DispatchRaysIndex().xy;
+    uint2 launchDim = DispatchRaysDimensions().xy;
+
+    // Shoot rays through the center of a pixel.
+    float2 frameCoord = launchIndex + float2(0.5, 0.5);
+
+    // Initial random number generator seed for this pixel. The rngState will change every time we draw a random number.
+    uint rngState = uint(uint(launchIndex.x) * uint(1973) + uint(launchIndex.y) * uint(9277) + uint(g_ConvergenceStep + g_FrameIndex) * uint(26699)) | uint(1);
+   
+    // Plus a jitter for anti-aliasing. | Only works for frames-accumulating.
+    float2 jitter = float2(RandomFloat01(rngState), RandomFloat01(rngState)) - float2(0.5, 0.5);
+
+    float2 ndcCoords = (frameCoord + jitter) / float2(launchDim.x - 1, launchDim.y - 1);
+        
+    ndcCoords = ndcCoords * 2 - float2(1, 1);
+    ndcCoords = ndcCoords * g_Zoom;
+
+    // Get a ray in view space.
+    float3 viewDirection = normalize(float3(ndcCoords.x * g_AspectRatio, ndcCoords.y, 1));
+
+    // Rotate the ray from view space to world space.
+    float3 rayDirection = mul((float3x3)unity_CameraToWorld, viewDirection);
+    // float3 rayDirection = mul((float3x3)g_PrevCameraMatrix, float3(viewDirection.x, viewDirection.y, -viewDirection.z));
+    
+    RayDesc ray;
+    ray.Origin      = _WorldSpaceCameraPos;
+    ray.Direction   = rayDirection;
+    ray.TMin        = K_T_MIN;
+    ray.TMax        = K_T_MAX;
+
+    PathPayload payload;
+    payload.radiance                = float3(1, 1, 1);
+    payload.emission                = float3(0, 0, 0);
+    payload.rngState                = rngState;
+    payload.bounceIndexOpaque       = 0;
+    payload.bounceIndexTransparent  = 0;
+    payload.bounceRayOrigin         = float3(0, 0, 0);
+    payload.bounceRayDirection      = float3(0, 0, 0);
+
+    // Safe net for when shaders have compilation errors and don't increase the bounce index, resulting in an infinite loop.
+    uint safeNet = 0;
+
+    float3 throughput = float3(1, 1, 1);
+    bool hit = false;
+
+    do
+    {
+        TraceRay(g_AccelStruct, 0, 0xFF, 0, 1, K_MISS_SHADER_PT_INDEX, ray, payload);
+        
+        if(payload.emission.x + payload.emission.y + payload.emission.z > 1e-6)
+        {// hit light, end the path
+            throughput *= payload.emission;
+            hit = true;
+            break;
+        }
+
+        // continue the path
+        throughput *= payload.radiance;
+
+#define ENABLE_RUSSIAN_ROULETTE 1
+#if ENABLE_RUSSIAN_ROULETTE
+        float pathStopProbability = 1;
+        pathStopProbability = max(throughput.r, max(throughput.g, throughput.b));
+        // Dark colors have higher chance to terminate the path early.
+        if (pathStopProbability < RandomFloat01(payload.rngState))
+        {
+            throughput = float3(0, 0, 0);
+            break;
+        }
+        throughput *= rcp(pathStopProbability);
+#endif
+
+        ray.Origin      = payload.bounceRayOrigin;
+        ray.Direction   = payload.bounceRayDirection;
+    }
+    while ((payload.bounceIndexOpaque <= g_BounceCountOpaque) && (payload.bounceIndexTransparent <= g_BounceCountTransparent) && (++safeNet < 1000));
+
+    if(!hit) throughput = float3(0, 0, 0);
+   
+    // Accumulation?
+    float3 prevRadiance = g_Output[launchIndex].xyz;
+    float3 result = (g_ConvergenceStep == 0) ? throughput : lerp(prevRadiance, throughput, rcp(float(g_ConvergenceStep + 1)));
+
+    g_Output[launchIndex] = float4(saturate(result), 1);
+}
+
+[shader("miss")]
+void MissShader0_Primary(inout PathPayload payload : SV_RayPayload)
+{
+    payload.emission                = g_EnvTex.SampleLevel(sampler_g_EnvTex, WorldRayDirection(), 0).xyz;
+    payload.bounceIndexOpaque       = -1;
+}
+
+#endif
