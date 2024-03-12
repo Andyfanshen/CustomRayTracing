@@ -108,7 +108,7 @@ MonoBehaviour:
   active: 1
   enable:
     m_OverrideState: 1
-    m_Value: 1
+    m_Value: 0
   envTexture:
     m_OverrideState: 1
     m_Value: {fileID: 8900000, guid: 1ebad6ad6023d234ea3ed50f95d6299a, type: 3}
@@ -118,13 +118,22 @@ MonoBehaviour:
     m_Value: 1
   bounceCount:
     m_OverrideState: 1
-    m_Value: 8
+    m_Value: 16
   maximumSamples:
     m_OverrideState: 1
     m_Value: 512
   accumulation:
     m_OverrideState: 1
+    m_Value: 0
+  restir:
+    m_OverrideState: 1
     m_Value: 1
+  clearRestirBuffer:
+    m_OverrideState: 1
+    m_Value: 0
+  debugMode:
+    m_OverrideState: 1
+    m_Value: 0
 --- !u!114 &849379129802519247
 MonoBehaviour:
   m_ObjectHideFlags: 3

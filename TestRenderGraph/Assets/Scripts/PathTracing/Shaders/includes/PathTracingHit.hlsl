@@ -1,8 +1,13 @@
 #ifndef RT_PATHTRACINGHIT
 #define RT_PATHTRACINGHIT
 
-#include "UnityRaytracingMeshUtils.cginc"
-#include "RayPayload.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+#include "Restir.hlsl"
 #include "Utils.hlsl"
 #include "BRDF.hlsl"
 #include "Global.hlsl"
@@ -13,6 +18,15 @@
 #pragma shader_feature_raytracing _METALLICSPECGLOSSMAP
 #pragma shader_feature_raytracing _EMISSION
 #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
+
+void DebugMethod(inout PathPayload payload, float3 output)
+{
+	//output = (output + float3(1,1,1)) / 2.0;
+	//payload.radiance = output;
+	payload.emission = output;
+	payload.bounceIndexOpaque = K_MAX_BOUNCES + 1;
+	return;
+}
 
 float3 GetNormalTS(float2 uv)
 {
@@ -49,11 +63,7 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	float3 worldFaceNormal = normalize(mul(cross(e0, e1), (float3x3)WorldToObject()));
 
 	// Construct TBN
-	float3 tangent = normalize(mul(v.tangent, (float3x3)WorldToObject()));
-	float3 N = worldNormal;
-	float3 T = normalize(tangent - dot(tangent, N) * N);
-	float3 Bi = normalize(cross(T, N));
-	float3x3 TBN = float3x3(T, Bi, N);
+	float3x3 TBN = GetLocalFrame(worldNormal);
 
 	float3 albedo = _BaseColor.xyz * _BaseMap.SampleLevel(sampler__BaseMap, _BaseMap_ST.xy * v.uv + _BaseMap_ST.zw, 0).xyz;
 
@@ -61,26 +71,22 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 
 	float smoothness = _Smoothness;
 
+	float3 emission = float3(0, 0, 0);
+	
+#if _NORMALMAP
+	localNormal = GetNormalTS(v.uv);
+	worldNormal = normalize(mul(localNormal, TBN));
+	TBN = float3x3(T, Bi, N);
+#endif
+
 #if _METALLICSPECGLOSSMAP
 	float4 metallicSmoothness = _MetallicGlossMap.SampleLevel(sampler__MetallicGlossMap, _MetallicGlossMap_ST.xy * v.uv + _MetallicGlossMap_ST.zw, 0);
 	metallic = metallicSmoothness.xxx;
 	smoothness *= metallicSmoothness.w;
 #endif
 
-	smoothness = smoothness;
-	float3 emission = float3(0, 0, 0);
-
 #if _EMISSION
 	emission = _EmissionColor * _EmissionMap.SampleLevel(sampler__EmissionMap, _EmissionMap_ST.xy * v.uv + _EmissionMap_ST.zw, 0).xyz;
-#endif
-
-#if _NORMALMAP
-	localNormal = GetNormalTS(v.uv);	
-	worldNormal = normalize(mul(localNormal, TBN));
-	N = worldNormal;
-	T = normalize(T - dot(T, N) * N);
-	Bi = normalize(cross(T, N));
-	TBN = float3x3(T, Bi, N);
 #endif
 
 #if _SURFACE_TYPE_TRANSPARENT
@@ -109,7 +115,7 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 
 	uint bounceIndexTransparent = payload.bounceIndexTransparent + 1;
 
-	float3 pushOff = worldNormal * (doRefraction ? -K_RAY_ORIGIN_PUSH_OFF : K_RAY_ORIGIN_PUSH_OFF);
+	float3 pushOff = worldFaceNormal * (doRefraction ? -K_RAY_ORIGIN_PUSH_OFF : K_RAY_ORIGIN_PUSH_OFF);
 
 	float3 bounceRayDir = lerp(reflectionRayDir, refractionRayDir, doRefraction);
 #else
@@ -118,14 +124,15 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	float3 view = -WorldRayDirection();
 	float3 view_tangent = mul(TBN, view);
 	
-	float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+	float3 F0 = lerp(albedo, float3(0.04, 0.04, 0.04), metallic);
 	float3 fresnel = FresnelSchlick(view, worldNormal, F0);
 
     float3 bounceDir_tangent;
 	float3 radiance;
 	if(RandomFloat01(payload.rngState) < smoothness)
 	{// specular
-		radiance = EvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, payload.rngState);
+		float pdf;
+		radiance = TestEvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, payload.rngState, pdf);
 	}
 	else
 	{// diffuse
@@ -139,15 +146,17 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 
 	uint bounceIndexTransparent = payload.bounceIndexTransparent;
 
-	float3 pushOff = K_RAY_ORIGIN_PUSH_OFF * worldFaceNormal;
+	float3 pushOff = worldFaceNormal * K_RAY_ORIGIN_PUSH_OFF;
 
 #endif
 	payload.radiance = radiance;
 	payload.emission = emission;
 	payload.bounceIndexOpaque = bounceIndexOpaque;
 	payload.bounceIndexTransparent = bounceIndexTransparent;
-	payload.bounceRayOrigin = worldPosition + pushOff;
 	payload.bounceRayDirection = bounceRayDir;
+	payload.pushOff = pushOff;
+	payload.hitPointNormal = worldNormal;
+	payload.T = RayTCurrent();
 }
 
 #endif

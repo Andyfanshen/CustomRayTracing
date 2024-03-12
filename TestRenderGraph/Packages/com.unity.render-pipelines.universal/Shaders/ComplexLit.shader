@@ -494,6 +494,20 @@ Shader "Universal Render Pipeline/Complex Lit"
         }
     }
 
+    SubShader
+	{
+		Pass
+		{
+			Name "PathTracing"
+			Tags{ "LightMode" = "RayTracing" }
+
+			HLSLPROGRAM
+
+			#include "Assets/Scripts/PathTracing/Shaders/includes/PathTracingHit.hlsl"
+
+			ENDHLSL
+		}
+	}
     //////////////////////////////////////////////////////
 
     FallBack "Hidden/Universal Render Pipeline/Lit"

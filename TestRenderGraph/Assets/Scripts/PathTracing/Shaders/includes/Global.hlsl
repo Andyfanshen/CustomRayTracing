@@ -31,7 +31,5 @@ float _ExtinctionCoefficient;
 RaytracingAccelerationStructure g_AccelStruct : register(t0, space1);
 
 RWTexture2D<float4> g_Output : register(u0);
-RWTexture2D<float4> g_DebugTex : register(u1);
-RWTexture2D<float4> g_Reservoir0 : register(u2);
 
 #endif

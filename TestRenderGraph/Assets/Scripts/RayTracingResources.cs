@@ -19,6 +19,13 @@ public class RayTracingResources : IRenderPipelineResources
         get => new Material(blitShader);
     }
 
+    [SerializeField, ResourcePath("Scripts/PathTracing/Shaders/DebugBlit.shader")]
+    private Shader debugBlitShader;
+    public Material DebugBlitMaterial
+    {
+        get => new Material(debugBlitShader);
+    }
+
     #region Path Tracing
     [Header("Path Tracing")]
     [SerializeField, ResourcePath("Scripts/PathTracing/Shaders/PathTracing.raytrace")]

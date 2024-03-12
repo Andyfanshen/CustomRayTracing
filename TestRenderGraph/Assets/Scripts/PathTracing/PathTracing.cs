@@ -19,6 +19,12 @@ namespace UnityEngine.Rendering.Universal
 
         public BoolParameter accumulation = new BoolParameter(true);
 
+        public BoolParameter restir = new BoolParameter(false);
+
+        public BoolParameter clearRestirBuffer = new BoolParameter(false);
+
+        public BoolParameter debugMode = new BoolParameter(false);
+
         public bool IsActive() => enable.value;
     }
 

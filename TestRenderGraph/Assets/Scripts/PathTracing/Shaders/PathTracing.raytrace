@@ -1,41 +1,68 @@
 #ifndef RT_PATHTRACING
 #define RT_PATHTRACING
 
-#include "UnityShaderVariables.cginc"
-#include "includes/RayPayload.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityGBuffer.hlsl"
+
+#include "includes/Restir.hlsl"
 #include "includes/Utils.hlsl"
 #include "includes/Global.hlsl"
+#include "includes/BRDF.hlsl"
+
+#pragma multi_compile __ RESTIR
 
 uint g_ConvergenceStep;
 uint g_FrameIndex;
 float g_Zoom;
 float g_AspectRatio;
+float4 g_DirectionalLight;
 uint g_BounceCountOpaque;
 uint g_BounceCountTransparent;
 uint g_MaxSamples;
+int g_ReSTIR;
+int g_ClearBuffer;
 
 TextureCube<float4> g_EnvTex;
 SamplerState sampler_g_EnvTex;
 
+Texture2D<float4> _DepthTex;
+SamplerState sampler__DepthTex;
+
+Texture2D<float4> _AlbedoBufferTex; // GBuffer_0
+SamplerState sampler__AlbedoBufferTex;
+
+Texture2D<float4> _SpecularBufferTex; // GBuffer_1
+SamplerState sampler__SpecularBufferTex;
+
+Texture2D<float4> _NormalBufferTex; // GBuffer_2
+SamplerState sampler__NormalBufferTex;
+
+RWStructuredBuffer<Reservoir> _RestirTemporalBuffer;
+
 #pragma max_recursion_depth 10
 
-[shader("raygeneration")]
-void PathTracingRayGenShader()
+float4 DecodeNormalBuffer(uint2 texcoord)
+{    
+    float4 normalBuffer = _NormalBufferTex[texcoord];
+    float3 packNormalWS = normalBuffer.rgb;
+    float3 unpackNormalWS = UnpackNormal(packNormalWS);
+
+    // rgb = normalWS, a = smoothness
+    return float4(unpackNormalWS, normalBuffer.a);
+}
+
+float3 GetRayDirection(float2 frameCoord, uint2 launchDim, bool jit, inout uint seed)
 {
-    uint2 launchIndex = DispatchRaysIndex().xy;
-    uint2 launchDim = DispatchRaysDimensions().xy;
-
-    // Shoot rays through the center of a pixel.
-    float2 frameCoord = launchIndex + float2(0.5, 0.5);
-
-    // Initial random number generator seed for this pixel. The rngState will change every time we draw a random number.
-    uint rngState = uint(uint(launchIndex.x) * uint(1973) + uint(launchIndex.y) * uint(9277) + uint(g_ConvergenceStep + g_FrameIndex) * uint(26699)) | uint(1);
-   
     // Plus a jitter for anti-aliasing. | Only works for frames-accumulating.
-    float2 jitter = float2(RandomFloat01(rngState), RandomFloat01(rngState)) - float2(0.5, 0.5);
-
-    float2 ndcCoords = (frameCoord + jitter) / float2(launchDim.x - 1, launchDim.y - 1);
-        
+    float2 ndcCoords = (frameCoord + 
+        (jit ? float2(RandomFloat01(seed), RandomFloat01(seed)) : float2(0, 0))
+        - float2(0.5, 0.5))
+        / float2(launchDim.x - 1, launchDim.y - 1);
+    
     ndcCoords = ndcCoords * 2 - float2(1, 1);
     ndcCoords = ndcCoords * g_Zoom;
 
@@ -43,34 +70,113 @@ void PathTracingRayGenShader()
     float3 viewDirection = normalize(float3(ndcCoords.x * g_AspectRatio, ndcCoords.y, 1));
 
     // Rotate the ray from view space to world space.
-    float3 rayDirection = mul((float3x3)unity_CameraToWorld, viewDirection);
+    return mul((float3x3)unity_CameraToWorld, viewDirection);    
     // float3 rayDirection = mul((float3x3)g_PrevCameraMatrix, float3(viewDirection.x, viewDirection.y, -viewDirection.z));
+}
+
+[shader("raygeneration")]
+void PathTracingRayGenShader()
+{
+    uint2 launchIndex = DispatchRaysIndex().xy;
+    uint2 launchDim = DispatchRaysDimensions().xy;
     
+    // Initial random number generator seed for this pixel. The rngState will change every time we draw a random number.
+    uint rngState = uint(uint(launchIndex.x) * uint(1973) + uint(launchIndex.y) * uint(9277) + uint(g_ConvergenceStep + g_FrameIndex) * uint(26699)) | uint(1);
+
+#define HYBRID_TRACING 1
+#if HYBRID_TRACING
+    float depthValue = _DepthTex[launchIndex].r;
+    // This point is part of the background, we don't really care
+    if(depthValue == 0.0)
+    {
+        g_Output[launchIndex] = 0;
+    }    
+    // Get the material properties
+    float4 albedo = _AlbedoBufferTex[launchIndex];
+    float4 specualrMetallic = _SpecularBufferTex[launchIndex];
+    float4 normalSmoothness = DecodeNormalBuffer(launchIndex);
+
+    PositionInputs posInput = GetPositionInput(launchIndex, 1.0 / launchDim.xy, depthValue, UNITY_MATRIX_I_VP, GetWorldToViewMatrix(), 0);
+    float distanceToCamera = length(posInput.positionWS);
+    // Compute the incident vector on the surfaces | i.e. w_o
+    const float3 viewWS = GetWorldSpaceNormalizeViewDir(posInput.positionWS);
+    // Create the local ortho basis
+    float3x3 localToWorld = GetLocalFrame(normalSmoothness.xyz);
+    float roughness = 1 - normalSmoothness.w;
+    float3 view_tangent = mul(localToWorld, viewWS);
+    float3 F0 = lerp(albedo.xyz, float3(0.04, 0.04, 0.04), specualrMetallic.r);
+    float3 fresnel = FresnelSchlick(viewWS, normalSmoothness.xyz, F0);
+    float3 bounceDir_tangent, radiance;
+    float pdf = 0;
+    float2 u = float2(RandomFloat01(rngState), RandomFloat01(rngState));
+    if(RandomFloat01(rngState) < normalSmoothness.w)
+    {// specular
+		radiance = TestEvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, rngState, pdf);
+        pdf *= normalSmoothness.w;
+    }else
+    {// diffuse
+        bounceDir_tangent = SampleCosineHemisphere(float3(0, 0, 1), rngState);
+		radiance = albedo.xyz;
+        pdf = 1 - normalSmoothness.w;
+    }
+    pdf = 1;
+    // Compute the scattered vector on the surfaces | i.e. w_i
+    float3 scatteredDirection = mul(bounceDir_tangent, localToWorld);
+    float3 pushOff = normalSmoothness.xyz * K_RAY_ORIGIN_PUSH_OFF;
+    
+    RayDesc ray;
+    ray.Origin      = posInput.positionWS + pushOff;
+    ray.Direction   = scatteredDirection;
+    ray.TMin        = K_T_MIN;
+    ray.TMax        = K_T_MAX;
+
+    float3 throughput = float3(1, 1, 1);
+    float3 samplePointPos = float3(0, 0, 0);
+    float3 samplePointNormal = float3(0, 0, 0);
+#else
+    // Shoot rays through the center of a pixel.
+    float2 frameCoord = launchIndex + float2(0.5, 0.5);
+    
+    float3 rayDirection = GetRayDirection(frameCoord, launchDim, true, rngState);    
+
     RayDesc ray;
     ray.Origin      = _WorldSpaceCameraPos;
     ray.Direction   = rayDirection;
     ray.TMin        = K_T_MIN;
     ray.TMax        = K_T_MAX;
 
+    float3 throughput = float3(1, 1, 1);
+#endif
     PathPayload payload;
     payload.radiance                = float3(1, 1, 1);
     payload.emission                = float3(0, 0, 0);
     payload.rngState                = rngState;
     payload.bounceIndexOpaque       = 0;
     payload.bounceIndexTransparent  = 0;
-    payload.bounceRayOrigin         = float3(0, 0, 0);
     payload.bounceRayDirection      = float3(0, 0, 0);
-
+    payload.pushOff                 = float3(0, 0, 0);
+    payload.hitPointNormal          = float3(0, 0, 0);
+    payload.T                       = 0;
+    
     // Safe net for when shaders have compilation errors and don't increase the bounce index, resulting in an infinite loop.
     uint safeNet = 0;
-
-    float3 throughput = float3(1, 1, 1);
     bool hit = false;
 
     do
     {
         TraceRay(g_AccelStruct, 0, 0xFF, 0, 1, K_MISS_SHADER_PT_INDEX, ray, payload);
         
+#if HYBRID_TRACING
+        if(g_ReSTIR > 0)
+        {
+            if(payload.bounceIndexOpaque + payload.bounceIndexTransparent == 1)
+            {
+                samplePointPos = ray.Origin + ray.Direction * payload.T;
+                samplePointNormal = payload.hitPointNormal;
+            }
+        }
+#endif
+
         if(payload.emission.x + payload.emission.y + payload.emission.z > 1e-6)
         {// hit light, end the path
             throughput *= payload.emission;
@@ -94,13 +200,82 @@ void PathTracingRayGenShader()
         throughput *= rcp(pathStopProbability);
 #endif
 
-        ray.Origin      = payload.bounceRayOrigin;
+        ray.Origin      = ray.Origin + ray.Direction * payload.T + payload.pushOff;
         ray.Direction   = payload.bounceRayDirection;
     }
     while ((payload.bounceIndexOpaque <= g_BounceCountOpaque) && (payload.bounceIndexTransparent <= g_BounceCountTransparent) && (++safeNet < 1000));
 
     if(!hit) throughput = float3(0, 0, 0);
    
+#if HYBRID_TRACING
+    if(g_ClearBuffer > 0)
+    {
+        uint bufferId = launchIndex.y * launchDim.x + launchIndex.x;
+        Reservoir emptyReservoir;
+        emptyReservoir.sample.viewPos = float3(0, 0, 0);
+        emptyReservoir.sample.viewNormal = float3(0, 0, 0);
+        emptyReservoir.sample.samplePos = float3(0, 0, 0);
+        emptyReservoir.sample.sampleNormal = float3(0, 0, 0);
+        emptyReservoir.sample.radiance = float3(0, 0, 0);
+        emptyReservoir.w = 0;
+        emptyReservoir.M = 0;
+        emptyReservoir.Wout = 0;
+        _RestirTemporalBuffer[bufferId] = emptyReservoir;
+    }
+
+    if(g_ReSTIR > 0)
+    {
+        Reservoir R;
+        R.sample.viewPos = posInput.positionWS;
+        R.sample.viewNormal = normalSmoothness.xyz;
+        R.sample.samplePos = samplePointPos;
+        R.sample.sampleNormal = samplePointNormal;
+        R.sample.radiance = throughput;
+
+        float pQ = Luminance(throughput) / pdf;
+        R.w = pQ;
+        R.M = 1;
+        R.Wout = pQ / Luminance(throughput);
+
+        uint seed2 = g_FrameIndex * 7714523u + launchIndex.y * 7732u + launchIndex.x * 123;
+        uint bufferId = launchIndex.y * launchDim.x + launchIndex.x;
+        Reservoir cur_reservoir = R;
+        Reservoir old_reservoir = _RestirTemporalBuffer[bufferId];
+        Reservoir temporal_reservoir = old_reservoir;
+
+        // spatial merge
+        // uint leftId = launchIndex.x > 0 ? bufferId - 1 : bufferId;
+        // uint rightId = launchIndex.x < (launchDim.x - 1) ? bufferId + 1 : bufferId;
+        // uint topId = launchIndex.y > 0 ? bufferId - launchDim.y : bufferId;
+        // uint bottomId = launchIndex.y < (launchDim.y - 1) ? bufferId + launchDim.y : bufferId;
+        // Reservoir old_reservoir_left = _RestirTemporalBuffer[leftId];
+        // Reservoir old_reservoir_right = _RestirTemporalBuffer[rightId];
+        // Reservoir old_reservoir_top = _RestirTemporalBuffer[topId];
+        // Reservoir old_reservoir_bottom = _RestirTemporalBuffer[bottomId];
+        // float old_reservoir_left_lum = Luminance(old_reservoir_left.sample.radiance);
+        // float old_reservoir_right_lum = Luminance(old_reservoir_right.sample.radiance);
+        // float old_reservoir_top_lum = Luminance(old_reservoir_top.sample.radiance);
+        // float old_reservoir_bottom_lum = Luminance(old_reservoir_bottom.sample.radiance);
+        // if(old_reservoir_left_lum > 0) ReservoirMerge_spatial(old_reservoir, old_reservoir_left, old_reservoir_left_lum, RandomFloat01(seed2));
+        // if(old_reservoir_right_lum > 0) ReservoirMerge_spatial(old_reservoir, old_reservoir_right, old_reservoir_right_lum, RandomFloat01(seed2));
+        // if(old_reservoir_top_lum > 0) ReservoirMerge_spatial(old_reservoir, old_reservoir_top, old_reservoir_top_lum, RandomFloat01(seed2));
+        // if(old_reservoir_bottom_lum > 0) ReservoirMerge_spatial(old_reservoir, old_reservoir_bottom, old_reservoir_bottom_lum, RandomFloat01(seed2));
+        // float old_reservoir_lum = Luminance(old_reservoir.sample.radiance);
+        // if(old_reservoir_lum > 0) old_reservoir.Wout = old_reservoir.w / (old_reservoir.M * old_reservoir_lum);
+        // else old_reservoir = temporal_reservoir;
+
+        // temporal merge
+        float w = cur_reservoir.w;
+        ReservoirUpdate(old_reservoir, cur_reservoir.sample, w, RandomFloat01(seed2));
+
+        _RestirTemporalBuffer[bufferId] = old_reservoir;
+
+        throughput = old_reservoir.sample.radiance * old_reservoir.Wout;
+    }
+#endif
+
+    throughput *= radiance;    
+
     // Accumulation?
     float3 prevRadiance = g_Output[launchIndex].xyz;
     float3 result = (g_ConvergenceStep == 0) ? throughput : lerp(prevRadiance, throughput, rcp(float(g_ConvergenceStep + 1)));
@@ -112,6 +287,11 @@ void PathTracingRayGenShader()
 void MissShader0_Primary(inout PathPayload payload : SV_RayPayload)
 {
     payload.emission                = g_EnvTex.SampleLevel(sampler_g_EnvTex, WorldRayDirection(), 0).xyz;
+    // if(dot(g_DirectionalLight, payload.bounceRayDirection) > 0.98)
+    // {
+    //     payload.emission += g_DirectionalLight.w;
+    // }
+
     payload.bounceIndexOpaque       = -1;
 }
 

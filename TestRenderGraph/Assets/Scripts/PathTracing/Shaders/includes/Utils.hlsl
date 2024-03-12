@@ -18,7 +18,7 @@
 #define K_T_MAX                         10000
 #define K_FLT_MAX                       3.402823466e+38f
 #define K_MAX_BOUNCES                   1000
-#define K_RAY_ORIGIN_PUSH_OFF           0.002
+#define K_RAY_ORIGIN_PUSH_OFF           0.008
 #define K_MISS_SHADER_INDEX             0
 #define K_MISS_SHADER_SHADOW_INDEX      1
 #define K_MISS_SHADER_PT_INDEX          0
@@ -26,6 +26,19 @@
 #include "UnityRaytracingMeshUtils.cginc"
 
 /************* RAY TRACING STRUCTURE *************/
+
+struct PathPayload
+{
+    float3 radiance;
+    float3 emission;
+    uint bounceIndexOpaque;
+    uint bounceIndexTransparent;
+    float3 bounceRayDirection;
+    float3 pushOff;
+    float3 hitPointNormal;
+    uint rngState;
+    float T;
+};
 
 struct AttributeData
 {
@@ -72,15 +85,6 @@ float3 UnpackNormalmapRGorAG(float4 packednormal)
     normal.xy = packednormal.xy * 2 - 1;
     normal.z = sqrt(1 - saturate(dot(normal.xy, normal.xy)));
     return normal;
-}
-
-inline float3 UnpackNormal(float4 packednormal)
-{
-#if defined(UNITY_NO_DXT5nm)
-    return packednormal.xyz * 2 - 1;
-#else
-    return UnpackNormalmapRGorAG(packednormal);
-#endif
 }
 
 /************* RANDOM NUMBERS GENERATOR *************/
@@ -194,6 +198,23 @@ float gamma(float x)
 float beta(float m, float n)
 {
     return gamma(m) * gamma(n) / gamma(m + n);
+}
+
+// build orthonormal basis (Building an Orthonormal Basis from a 3D Unit Vector Without Normalization, [Frisvad2012])
+void BuildOrthonormalBasis(inout float3 omega_1, inout float3 omega_2, inout float3 omega_3)
+{
+    if(omega_3.z < -0.9999999f)
+    {
+        omega_1 = float3(0.0f, -1.0f, 0.0f);
+        omega_2 = float3(-1.0f, 0.0f, 0.0f);
+    }
+    else
+    {
+        float a = 1.0f / (1.0f + omega_3.z);
+        float b = -omega_3.x * omega_3.y * a;
+        omega_1 = float3(1.0f - omega_3.x * omega_3.x * a, b, -omega_3.x);
+        omega_2 = float3(b, 1.0f - omega_3.y * omega_3.y * a, -omega_3.y);
+    }
 }
 
 float3 FresnelSchlick(float3 incident, float3 normal, float3 F0)

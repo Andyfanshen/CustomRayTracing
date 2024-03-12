@@ -320,5 +320,7 @@ MonoBehaviour:
       type: {class: RayTracingResources, ns: , asm: Assembly-CSharp}
       data:
         blitShader: {fileID: 4800000, guid: 7404c7f6f586c8e4d85cd1d713afd965, type: 3}
+        debugBlitShader: {fileID: 4800000, guid: 64e73f80111f74e4faacfb0af7e0673d,
+          type: 3}
         m_PathTracingRT: {fileID: 4807578003741378534, guid: 3c75600b352173f40a820b3de4f51f25,
           type: 3}
