@@ -75,8 +75,8 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	
 #if _NORMALMAP
 	localNormal = GetNormalTS(v.uv);
-	worldNormal = normalize(mul(localNormal, TBN));
-	TBN = float3x3(T, Bi, N);
+	worldNormal = normalize(mul(localNormal, TBN));	
+	TBN = GetLocalFrame(worldNormal);
 #endif
 
 #if _METALLICSPECGLOSSMAP
