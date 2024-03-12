@@ -63,9 +63,24 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	float3 worldFaceNormal = normalize(mul(cross(e0, e1), (float3x3)WorldToObject()));
 
 	// Construct TBN
+	// vector_ws = mul(vector_ts, TBN);
+	// vector_ts = mul(TBN, vector_ws);
 	float3x3 TBN = GetLocalFrame(worldNormal);
 
 	float3 albedo = _BaseColor.xyz * _BaseMap.SampleLevel(sampler__BaseMap, _BaseMap_ST.xy * v.uv + _BaseMap_ST.zw, 0).xyz;
+
+	// Alpha clip
+	//float albedoAlpha = _BaseMap.SampleLevel(sampler__BaseMap, _BaseMap_ST.xy * v.uv + _BaseMap_ST.zw, 0).w;
+	//if(albedoAlpha < _Cutoff)
+	//{
+	//	payload.radiance = float3(1, 1, 1);
+	//	payload.emission = float3(0, 0, 0);
+	//	payload.bounceRayDirection = WorldRayDirection();
+	//	payload.pushOff = WorldRayDirection() * K_RAY_ORIGIN_PUSH_OFF;
+	//	payload.hitPointNormal = WorldRayDirection();
+	//	payload.T = RayTCurrent();
+	//	return;
+	//}
 
 	float3 metallic = _Metallic;
 
@@ -130,7 +145,13 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	if(RandomFloat01(payload.rngState) < smoothness)
 	{// specular
 		float pdf;
-		radiance = TestEvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, payload.rngState, pdf);
+		//radiance = TestEvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, payload.rngState, pdf);
+		
+		float2 u = float2(RandomFloat01(payload.rngState), RandomFloat01(payload.rngState));
+		float3 Ne = sampleGGX_VNDF(roughness, view_tangent, u, pdf);
+        pdf /= 4 * dot(view_tangent, Ne);
+        bounceDir_tangent = reflect(-view_tangent, Ne);
+        radiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness) / pdf;
 	}
 	else
 	{// diffuse

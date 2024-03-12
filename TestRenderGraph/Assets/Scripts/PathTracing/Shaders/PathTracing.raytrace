@@ -90,6 +90,7 @@ void PathTracingRayGenShader()
     if(depthValue == 0.0)
     {
         g_Output[launchIndex] = 0;
+        return;
     }    
     // Get the material properties
     float4 albedo = _AlbedoBufferTex[launchIndex];
@@ -100,26 +101,42 @@ void PathTracingRayGenShader()
     float distanceToCamera = length(posInput.positionWS);
     // Compute the incident vector on the surfaces | i.e. w_o
     const float3 viewWS = GetWorldSpaceNormalizeViewDir(posInput.positionWS);
+
+    // if(dot(viewWS, normalSmoothness.xyz) > 0)
+    // {
+    // }
+
     // Create the local ortho basis
     float3x3 localToWorld = GetLocalFrame(normalSmoothness.xyz);
     float roughness = 1 - normalSmoothness.w;
     float3 view_tangent = mul(localToWorld, viewWS);
     float3 F0 = lerp(albedo.xyz, float3(0.04, 0.04, 0.04), specualrMetallic.r);
-    float3 fresnel = FresnelSchlick(viewWS, normalSmoothness.xyz, F0);
-    float3 bounceDir_tangent, radiance;
-    float pdf = 0;
-    float2 u = float2(RandomFloat01(rngState), RandomFloat01(rngState));
+    // float3 fresnel = FresnelSchlick(viewWS, normalSmoothness.xyz, F0);
+    float3 fresnel = evalFresnelSchlick(F0, float3(1, 1, 1), dot(viewWS, normalSmoothness.xyz));
+    float3 bounceDir_tangent, firstRadiance;
+    float firstPdf = 0;
     if(RandomFloat01(rngState) < normalSmoothness.w)
     {// specular
-		radiance = TestEvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, rngState, pdf);
-        pdf *= normalSmoothness.w;
+		// firstRadiance = TestEvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, rngState, firstPdf);
+        float2 u = float2(RandomFloat01(rngState), RandomFloat01(rngState));
+        float3 Ne = sampleGGX_VNDF(roughness, view_tangent, u, firstPdf);
+        firstPdf /= 4 * dot(view_tangent, Ne);
+        bounceDir_tangent = reflect(-view_tangent, Ne);
+        firstRadiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness);
+
+        // firstPdf *= normalSmoothness.w; // with balance heuristic
     }else
     {// diffuse
         bounceDir_tangent = SampleCosineHemisphere(float3(0, 0, 1), rngState);
-		radiance = albedo.xyz;
-        pdf = 1 - normalSmoothness.w;
+		firstRadiance = albedo.xyz * K_INV_PI * dot(bounceDir_tangent, float3(0, 0, 1));
+
+        // firstPdf = (1 - normalSmoothness.w) * K_INV_PI * dot(bounceDir_tangent, float3(0, 0, 1)); // with balance heuristic
+        firstPdf = K_INV_PI * dot(bounceDir_tangent, float3(0, 0, 1));
     }
-    pdf = 1;
+    // if(firstPdf > 1) firstRadiance = float3(10, 0, 10);
+    // if(firstPdf == 13) firstRadiance = float3(0, 0, 10);
+    // firstRadiance = float3(firstPdf, 0, 0);
+
     // Compute the scattered vector on the surfaces | i.e. w_i
     float3 scatteredDirection = mul(bounceDir_tangent, localToWorld);
     float3 pushOff = normalSmoothness.xyz * K_RAY_ORIGIN_PUSH_OFF;
@@ -177,7 +194,7 @@ void PathTracingRayGenShader()
         }
 #endif
 
-        if(payload.emission.x + payload.emission.y + payload.emission.z > 1e-6)
+        if(Luminance(payload.emission) > 0)
         {// hit light, end the path
             throughput *= payload.emission;
             hit = true;
@@ -207,6 +224,8 @@ void PathTracingRayGenShader()
 
     if(!hit) throughput = float3(0, 0, 0);
    
+    throughput *= firstRadiance;
+
 #if HYBRID_TRACING
     if(g_ClearBuffer > 0)
     {
@@ -232,10 +251,10 @@ void PathTracingRayGenShader()
         R.sample.sampleNormal = samplePointNormal;
         R.sample.radiance = throughput;
 
-        float pQ = Luminance(throughput) / pdf;
+        float pQ = Luminance(throughput) / firstPdf;
         R.w = pQ;
         R.M = 1;
-        R.Wout = pQ / Luminance(throughput);
+        R.Wout = firstPdf;
 
         uint seed2 = g_FrameIndex * 7714523u + launchIndex.y * 7732u + launchIndex.x * 123;
         uint bufferId = launchIndex.y * launchDim.x + launchIndex.x;
@@ -266,13 +285,17 @@ void PathTracingRayGenShader()
 
         // temporal merge
         float w = cur_reservoir.w;
-        ReservoirUpdate(old_reservoir, cur_reservoir.sample, w, RandomFloat01(seed2));
+        if(Luminance(old_reservoir.sample.radiance)>0) ReservoirUpdate(old_reservoir, cur_reservoir.sample, w, RandomFloat01(seed2));
+        else old_reservoir = cur_reservoir;
 
         _RestirTemporalBuffer[bufferId] = old_reservoir;
 
         throughput = old_reservoir.sample.radiance * old_reservoir.Wout;
     }
-    throughput *= radiance;
+    else
+    {
+        throughput /= firstPdf;        
+    }
 #endif
 
     // Accumulation?

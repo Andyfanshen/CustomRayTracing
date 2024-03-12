@@ -752,14 +752,14 @@ float3 TestEvalGGXVNDF(float3 Ve, float3 fresnel, float alpha_x, float alpha_y, 
 {
     float u1 = RandomFloat01(seed);
     float u2 = RandomFloat01(seed);
-    float3 Ne = SampleGGXVNDF(Ve, alpha_x, alpha_y, u1, u2);
+    float3 Vh = normalize(float3(alpha_x * Ve.x, alpha_y * Ve.y, Ve.z));
+    float3 Ne = SampleGGXVNDF_Cap_Bounded_2023(Ve, Vh, alpha_x, alpha_y, u1, u2);
     Li = reflect(-Ve, Ne);
 
     float lambda_wi = Slope_GGX_Lambda(Li, alpha_x, alpha_y);
     float lambda_wo = Slope_GGX_Lambda(Ve, alpha_x, alpha_y);
 
-    pdf = GGXVNDF_PDF(Ve, Ne, alpha_x, alpha_y);
-    //pdf = GGXVNDF_Cap_Bounded_2023_PDF(Ve, Li, alpha_x, alpha_y);
+    pdf = GGXVNDF_Cap_Bounded_2023_PDF(Li, Ve, alpha_x, alpha_y);
     return fresnel * (1.0f + lambda_wo) / (1.0f + lambda_wi + lambda_wo);
 }
 
@@ -788,6 +788,8 @@ float3 SampleCosineHemisphere(float3 normal, inout uint state)
 
 float evalNdfGGX(float alpha, float cosTheta)
 {
+    alpha = max(0.01, alpha);
+    cosTheta = min(0.99, cosTheta);
     float a2 = alpha * alpha;
     float d = ((cosTheta * a2 - cosTheta) * cosTheta + 1);
     return a2 / (d * d * K_PI);
@@ -858,7 +860,9 @@ float evalPdfGGX_VNDF(float alpha, float3 wi, float3 h)
 {
     float G1 = evalG1GGX(alpha * alpha, wi.z);
     float D = evalNdfGGX(alpha, h.z);
-    return G1 * D * max(0.f, dot(wi, h)) / wi.z;
+    float pdf = G1 * D * max(0.f, dot(wi, h)) / wi.z;
+    //if(isnan(D)) pdf = 13;
+    return pdf;
 }
 
 /** Samples the GGX (Trowbridge-Reitz) using the distribution of visible normals (VNDF).

@@ -17,6 +17,7 @@ SamplerState sampler__MetallicGlossMap;
 
 float _Smoothness;
 float _Metallic;
+float _Cutoff;
 float _IOR;
 
 Texture2D<float4> _EmissionMap;

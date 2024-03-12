@@ -295,7 +295,7 @@ namespace UnityEngine.Rendering.Universal
                 //Others in resourceData: cameraDepthTexture, motionVectorColor...
 
                 // Debug Enter Point
-                TextureHandle sourceTexture = resourceData.cameraDepthTexture;
+                TextureHandle sourceTexture = resourceData.gBuffer[2];
 
                 TextureHandle destination = resourceData.activeColorTexture;
 
