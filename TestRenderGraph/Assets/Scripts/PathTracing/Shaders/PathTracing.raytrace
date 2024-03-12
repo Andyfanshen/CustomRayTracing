@@ -272,9 +272,8 @@ void PathTracingRayGenShader()
 
         throughput = old_reservoir.sample.radiance * old_reservoir.Wout;
     }
+    throughput *= radiance;
 #endif
-
-    throughput *= radiance;    
 
     // Accumulation?
     float3 prevRadiance = g_Output[launchIndex].xyz;
