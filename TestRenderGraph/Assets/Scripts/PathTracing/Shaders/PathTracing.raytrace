@@ -13,8 +13,6 @@
 #include "includes/Global.hlsl"
 #include "includes/BRDF.hlsl"
 
-#pragma multi_compile __ RESTIR
-
 uint g_ConvergenceStep;
 uint g_FrameIndex;
 float g_Zoom;
@@ -52,7 +50,7 @@ float4 DecodeNormalBuffer(uint2 texcoord)
     float3 unpackNormalWS = UnpackNormal(packNormalWS);
 
     // rgb = normalWS, a = smoothness
-    return float4(unpackNormalWS, normalBuffer.a);
+    return float4(unpackNormalWS, clamp(normalBuffer.a, 1e-4, 1 - 1e-4));
 }
 
 float3 GetRayDirection(float2 frameCoord, uint2 launchDim, bool jit, inout uint seed)
@@ -120,7 +118,7 @@ void PathTracingRayGenShader()
 		// firstRadiance = TestEvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, rngState, firstPdf);
         float2 u = float2(RandomFloat01(rngState), RandomFloat01(rngState));
         float3 Ne = sampleGGX_VNDF(roughness, view_tangent, u, firstPdf);
-        firstPdf /= 4 * dot(view_tangent, Ne);
+        firstPdf *= rcp(4 * dot(view_tangent, Ne));
         bounceDir_tangent = reflect(-view_tangent, Ne);
         firstRadiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness);
     }else
@@ -130,9 +128,6 @@ void PathTracingRayGenShader()
 
         firstPdf = K_INV_PI * dot(bounceDir_tangent, float3(0, 0, 1));
     }
-    // if(firstPdf > 1) firstRadiance = float3(10, 0, 10);
-    // if(firstPdf == 13) firstRadiance = float3(0, 0, 10);
-    // firstRadiance = float3(firstPdf, 0, 0);
 
     // Compute the scattered vector on the surfaces | i.e. w_i
     float3 scatteredDirection = mul(bounceDir_tangent, localToWorld);
@@ -248,7 +243,7 @@ void PathTracingRayGenShader()
         R.sample.sampleNormal = samplePointNormal;
         R.sample.radiance = throughput;
 
-        float pQ = Luminance(throughput) / firstPdf;
+        float pQ = Luminance(throughput) * rcp(firstPdf);
         R.w = pQ;
         R.M = 1;
         R.Wout = firstPdf;
@@ -282,8 +277,7 @@ void PathTracingRayGenShader()
 
         // temporal merge
         float w = cur_reservoir.w;
-        if(Luminance(old_reservoir.sample.radiance)>0) ReservoirUpdate(old_reservoir, cur_reservoir.sample, w, RandomFloat01(seed2));
-        else old_reservoir = cur_reservoir;
+        ReservoirUpdate(old_reservoir, cur_reservoir.sample, w, RandomFloat01(seed2));
 
         _RestirTemporalBuffer[bufferId] = old_reservoir;
 
@@ -291,7 +285,7 @@ void PathTracingRayGenShader()
     }
     else
     {
-        throughput /= firstPdf;        
+        throughput *= rcp(firstPdf);
     }
 #endif
 
@@ -299,7 +293,8 @@ void PathTracingRayGenShader()
     float3 prevRadiance = g_Output[launchIndex].xyz;
     float3 result = (g_ConvergenceStep == 0) ? throughput : lerp(prevRadiance, throughput, rcp(float(g_ConvergenceStep + 1)));
 
-    g_Output[launchIndex] = float4(saturate(result), 1);
+    if(isnan(result.x) || isnan(result.y) || isnan(result.z)) g_Output[launchIndex] = float4(0, 0, 0, 1);
+    else g_Output[launchIndex] = float4(saturate(result), 1);
 }
 
 [shader("miss")]

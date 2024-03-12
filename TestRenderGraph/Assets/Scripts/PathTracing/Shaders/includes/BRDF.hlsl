@@ -788,8 +788,6 @@ float3 SampleCosineHemisphere(float3 normal, inout uint state)
 
 float evalNdfGGX(float alpha, float cosTheta)
 {
-    alpha = max(0.01, alpha);
-    cosTheta = min(0.99, cosTheta);
     float a2 = alpha * alpha;
     float d = ((cosTheta * a2 - cosTheta) * cosTheta + 1);
     return a2 / (d * d * K_PI);

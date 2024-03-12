@@ -103,6 +103,9 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	emission = _EmissionColor * _EmissionMap.SampleLevel(sampler__EmissionMap, _EmissionMap_ST.xy * v.uv + _EmissionMap_ST.zw, 0).xyz;
 #endif
 
+	metallic = clamp(metallic, 1e-4, 1 - 1e-4);
+	smoothness = clamp(smoothness, 1e-4, 1 - 1e-4);
+
 #if _SURFACE_TYPE_TRANSPARENT
 	float ior = 1.5; // _IOR
 	float extinction = 10; // _ExtinctionCoefficient;
@@ -150,9 +153,9 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 		
 		float2 u = float2(RandomFloat01(payload.rngState), RandomFloat01(payload.rngState));
 		float3 Ne = sampleGGX_VNDF(roughness, view_tangent, u, pdf);
-        pdf /= 4 * dot(view_tangent, Ne);
+        pdf *= rcp(4 * dot(view_tangent, Ne));
         bounceDir_tangent = reflect(-view_tangent, Ne);
-        radiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness) / pdf;
+        radiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness) * rcp(pdf);
 	}
 	else
 	{// diffuse

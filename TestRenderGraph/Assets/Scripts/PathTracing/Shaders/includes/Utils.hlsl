@@ -18,7 +18,7 @@
 #define K_T_MAX                         10000
 #define K_FLT_MAX                       3.402823466e+38f
 #define K_MAX_BOUNCES                   1000
-#define K_RAY_ORIGIN_PUSH_OFF           0.008
+#define K_RAY_ORIGIN_PUSH_OFF           0.002
 #define K_MISS_SHADER_INDEX             0
 #define K_MISS_SHADER_SHADOW_INDEX      1
 #define K_MISS_SHADER_PT_INDEX          0
