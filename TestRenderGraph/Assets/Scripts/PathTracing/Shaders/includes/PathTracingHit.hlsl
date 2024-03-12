@@ -70,17 +70,17 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	float3 albedo = _BaseColor.xyz * _BaseMap.SampleLevel(sampler__BaseMap, _BaseMap_ST.xy * v.uv + _BaseMap_ST.zw, 0).xyz;
 
 	// Alpha clip
-	//float albedoAlpha = _BaseMap.SampleLevel(sampler__BaseMap, _BaseMap_ST.xy * v.uv + _BaseMap_ST.zw, 0).w;
-	//if(albedoAlpha < _Cutoff)
-	//{
-	//	payload.radiance = float3(1, 1, 1);
-	//	payload.emission = float3(0, 0, 0);
-	//	payload.bounceRayDirection = WorldRayDirection();
-	//	payload.pushOff = WorldRayDirection() * K_RAY_ORIGIN_PUSH_OFF;
-	//	payload.hitPointNormal = WorldRayDirection();
-	//	payload.T = RayTCurrent();
-	//	return;
-	//}
+	float albedoAlpha = _BaseMap.SampleLevel(sampler__BaseMap, _BaseMap_ST.xy * v.uv + _BaseMap_ST.zw, 0).w;
+	if(albedoAlpha < _Cutoff)
+	{
+		payload.radiance = float3(1, 1, 1);
+		payload.emission = float3(0, 0, 0);
+		payload.bounceRayDirection = WorldRayDirection();
+		payload.pushOff = WorldRayDirection() * K_RAY_ORIGIN_PUSH_OFF;
+		payload.hitPointNormal = WorldRayDirection();
+		payload.T = RayTCurrent();
+		return;
+	}
 
 	float3 metallic = _Metallic;
 
@@ -90,6 +90,7 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	
 #if _NORMALMAP
 	localNormal = GetNormalTS(v.uv);
+	worldNormal = mul(localNormal, TBN);
 #endif
 
 #if _METALLICSPECGLOSSMAP
@@ -128,7 +129,7 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 
 	uint bounceIndexTransparent = payload.bounceIndexTransparent + 1;
 
-	float3 pushOff = worldFaceNormal * (doRefraction ? -K_RAY_ORIGIN_PUSH_OFF : K_RAY_ORIGIN_PUSH_OFF);
+	float3 pushOff = worldNormal * (doRefraction ? -K_RAY_ORIGIN_PUSH_OFF : K_RAY_ORIGIN_PUSH_OFF);
 
 	float3 bounceRayDir = lerp(reflectionRayDir, refractionRayDir, doRefraction);
 #else

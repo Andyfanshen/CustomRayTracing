@@ -123,14 +123,11 @@ void PathTracingRayGenShader()
         firstPdf /= 4 * dot(view_tangent, Ne);
         bounceDir_tangent = reflect(-view_tangent, Ne);
         firstRadiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness);
-
-        // firstPdf *= normalSmoothness.w; // with balance heuristic
     }else
     {// diffuse
         bounceDir_tangent = SampleCosineHemisphere(float3(0, 0, 1), rngState);
 		firstRadiance = albedo.xyz * K_INV_PI * dot(bounceDir_tangent, float3(0, 0, 1));
 
-        // firstPdf = (1 - normalSmoothness.w) * K_INV_PI * dot(bounceDir_tangent, float3(0, 0, 1)); // with balance heuristic
         firstPdf = K_INV_PI * dot(bounceDir_tangent, float3(0, 0, 1));
     }
     // if(firstPdf > 1) firstRadiance = float3(10, 0, 10);
@@ -223,10 +220,10 @@ void PathTracingRayGenShader()
     while ((payload.bounceIndexOpaque <= g_BounceCountOpaque) && (payload.bounceIndexTransparent <= g_BounceCountTransparent) && (++safeNet < 1000));
 
     if(!hit) throughput = float3(0, 0, 0);
-   
+
+#if HYBRID_TRACING    
     throughput *= firstRadiance;
 
-#if HYBRID_TRACING
     if(g_ClearBuffer > 0)
     {
         uint bufferId = launchIndex.y * launchDim.x + launchIndex.x;
