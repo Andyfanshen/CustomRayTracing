@@ -212,7 +212,7 @@ void PathTracingRayGenShader()
 
     if(!hit) throughput = float3(0, 0, 0);
 
-#if HYBRID_TRACING    
+#if HYBRID_TRACING
     throughput *= firstRadiance;
 
     if(g_ClearBuffer > 0)
@@ -295,10 +295,6 @@ void PathTracingRayGenShader()
 void MissShader0_Primary(inout PathPayload payload : SV_RayPayload)
 {
     payload.emission                = g_EnvTex.SampleLevel(sampler_g_EnvTex, WorldRayDirection(), 0).xyz;
-    // if(dot(g_DirectionalLight, payload.bounceRayDirection) > 0.98)
-    // {
-    //     payload.emission += g_DirectionalLight.w;
-    // }
 
     payload.bounceIndexOpaque       = -1;
 }

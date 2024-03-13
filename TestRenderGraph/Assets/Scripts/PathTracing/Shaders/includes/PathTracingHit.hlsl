@@ -15,23 +15,23 @@
 #pragma raytracing test
 
 #pragma shader_feature_raytracing _NORMALMAP
+#pragma shader_feature_raytracing _BUMPMAP
 #pragma shader_feature_raytracing _METALLICSPECGLOSSMAP
 #pragma shader_feature_raytracing _EMISSION
 #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
 
-void DebugMethod(inout PathPayload payload, float3 output)
-{
-	//output = (output + float3(1,1,1)) / 2.0;
-	//payload.radiance = output;
-	payload.emission = output;
-	payload.bounceIndexOpaque = K_MAX_BOUNCES + 1;
-	return;
-}
-
 float3 GetNormalTS(float2 uv)
 {
-	float4 map = _NormalMap.SampleLevel(sampler__NormalMap, _NormalMap_ST.xy * uv + _NormalMap_ST.zw, 0);
-	return UnpackNormal(map);
+	float4 map = _BumpMap.SampleLevel(sampler__BumpMap, _BumpMap_ST.xy * uv + _BumpMap_ST.zw, 0);
+
+#if defined(UNITY_ASTC_NORMALMAP_ENCODING)
+    return UnpackNormalAG(map, _BumpScale);
+#elif defined(UNITY_NO_DXT5nm)
+    return UnpackNormalRGB(map, _BumpScale);
+#else
+    return UnpackNormalmapRGorAG(map, _BumpScale);
+#endif
+	//return UnpackNormal(map);
 }
 
 [shader("closesthit")]

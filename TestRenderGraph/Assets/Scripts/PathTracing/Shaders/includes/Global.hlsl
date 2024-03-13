@@ -7,6 +7,10 @@ Texture2D<float4> _BaseMap;
 float4 _BaseMap_ST;
 SamplerState sampler__BaseMap;
 
+Texture2D<float4> _BumpMap;
+float4 _BumpMap_ST;
+SamplerState sampler__BumpMap;
+
 Texture2D<float4> _NormalMap;
 float4 _NormalMap_ST;
 SamplerState sampler__NormalMap;
@@ -18,6 +22,7 @@ SamplerState sampler__MetallicGlossMap;
 float _Smoothness;
 float _Metallic;
 float _Cutoff;
+float _BumpScale;
 float _IOR;
 
 Texture2D<float4> _EmissionMap;
