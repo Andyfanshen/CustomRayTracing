@@ -1,7 +1,7 @@
 #ifndef RT_RESTIR
 #define RT_RESTIR
 
-static const int MAX_TEMPORAL_REUSE = 5;
+static const int MAX_TEMPORAL_REUSE = 15;
 static const int MAX_SPATIAL_REUSE = 50;
 
 struct RestirSample

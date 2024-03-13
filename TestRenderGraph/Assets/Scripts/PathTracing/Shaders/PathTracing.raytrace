@@ -97,30 +97,26 @@ void PathTracingRayGenShader()
 
     PositionInputs posInput = GetPositionInput(launchIndex, 1.0 / launchDim.xy, depthValue, UNITY_MATRIX_I_VP, GetWorldToViewMatrix(), 0);
     float distanceToCamera = length(posInput.positionWS);
+
     // Compute the incident vector on the surfaces | i.e. w_o
     const float3 viewWS = GetWorldSpaceNormalizeViewDir(posInput.positionWS);
-
-    // if(dot(viewWS, normalSmoothness.xyz) > 0)
-    // {
-    // }
 
     // Create the local ortho basis
     float3x3 localToWorld = GetLocalFrame(normalSmoothness.xyz);
     float roughness = 1 - normalSmoothness.w;
     float3 view_tangent = mul(localToWorld, viewWS);
     float3 F0 = lerp(albedo.xyz, float3(0.04, 0.04, 0.04), specualrMetallic.r);
+
     // float3 fresnel = FresnelSchlick(viewWS, normalSmoothness.xyz, F0);
     float3 fresnel = evalFresnelSchlick(F0, float3(1, 1, 1), dot(viewWS, normalSmoothness.xyz));
     float3 bounceDir_tangent, firstRadiance;
+    
     float firstPdf = 0;
     if(RandomFloat01(rngState) < normalSmoothness.w)
     {// specular
-		// firstRadiance = TestEvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, rngState, firstPdf);
-        float2 u = float2(RandomFloat01(rngState), RandomFloat01(rngState));
-        float3 Ne = sampleGGX_VNDF(roughness, view_tangent, u, firstPdf);
-        firstPdf *= rcp(4 * dot(view_tangent, Ne));
-        bounceDir_tangent = reflect(-view_tangent, Ne);
-        firstRadiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness);
+		float2 u = float2(RandomFloat01(rngState), RandomFloat01(rngState));
+		bounceDir_tangent = SampleGGXReflection(view_tangent, roughness, roughness, u, firstPdf);
+		firstRadiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness);
     }else
     {// diffuse
         bounceDir_tangent = SampleCosineHemisphere(float3(0, 0, 1), rngState);
@@ -292,9 +288,7 @@ void PathTracingRayGenShader()
     // Accumulation?
     float3 prevRadiance = g_Output[launchIndex].xyz;
     float3 result = (g_ConvergenceStep == 0) ? throughput : lerp(prevRadiance, throughput, rcp(float(g_ConvergenceStep + 1)));
-
-    if(isnan(result.x) || isnan(result.y) || isnan(result.z)) g_Output[launchIndex] = float4(0, 0, 0, 1);
-    else g_Output[launchIndex] = float4(saturate(result), 1);
+    g_Output[launchIndex] = float4(saturate(result), 1);
 }
 
 [shader("miss")]

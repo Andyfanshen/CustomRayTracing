@@ -149,13 +149,9 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	if(RandomFloat01(payload.rngState) < smoothness)
 	{// specular
 		float pdf;
-		//radiance = TestEvalGGXVNDF(view_tangent, fresnel, roughness, roughness, bounceDir_tangent, payload.rngState, pdf);
-		
 		float2 u = float2(RandomFloat01(payload.rngState), RandomFloat01(payload.rngState));
-		float3 Ne = sampleGGX_VNDF(roughness, view_tangent, u, pdf);
-        pdf *= rcp(4 * dot(view_tangent, Ne));
-        bounceDir_tangent = reflect(-view_tangent, Ne);
-        radiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness) * rcp(pdf);
+		bounceDir_tangent = SampleGGXReflection(view_tangent, roughness, roughness, u, pdf);
+		radiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness) * rcp(pdf);
 	}
 	else
 	{// diffuse
