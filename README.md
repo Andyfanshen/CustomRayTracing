@@ -4,7 +4,7 @@
 - Path tracing pass **Injected** as volume component
 - Support URP Lit.shader & ComplexLit.shader (Modified)
 - Support Hybrid ray tracing (Path Tracing from G-Buffer)
-- Support [Bounded VNDF sampling for smith-GGX reflection](https://dl.acm.org/doi/10.1145/3610543.3626163)
+- Support [Bounded VNDF sampling for smith-GGX reflections](https://dl.acm.org/doi/10.1145/3610543.3626163)
 - Support temporal reuse ReSTIR (motion vector not used yet)
 
 ### Pictures
@@ -19,5 +19,5 @@
 2.3 Path Tracing result (temporal ReSTIR, 1spp)
 ![图片](https://github.com/Andyfanshen/CustomRayTracing/assets/33785908/10a7a898-5131-416e-bc3f-317bc38bd103)
 
-2.4 Ground Truth (raw, 8192spp)
-![图片](https://github.com/Andyfanshen/CustomRayTracing/assets/33785908/f3762057-3d7a-427f-9c75-ca3e461bf889)
+2.4 Ground Truth (8192spp)
+![图片](https://github.com/Andyfanshen/CustomRayTracing/assets/33785908/2a793b93-acee-46c6-817c-9fd2a4a1f423)
