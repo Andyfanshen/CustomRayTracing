@@ -15,7 +15,6 @@
 #pragma raytracing test
 
 #pragma shader_feature_raytracing _NORMALMAP
-#pragma shader_feature_raytracing _BUMPMAP
 #pragma shader_feature_raytracing _METALLICSPECGLOSSMAP
 #pragma shader_feature_raytracing _EMISSION
 #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
@@ -63,8 +62,6 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 	float3 worldFaceNormal = normalize(mul(cross(e0, e1), (float3x3)WorldToObject()));
 
 	// Construct TBN
-	// vector_ws = mul(vector_ts, TBN);
-	// vector_ts = mul(TBN, vector_ws);
 	float3x3 TBN = GetLocalFrame(worldNormal);
 
 	float3 albedo = _BaseColor.xyz * _BaseMap.SampleLevel(sampler__BaseMap, _BaseMap_ST.xy * v.uv + _BaseMap_ST.zw, 0).xyz;

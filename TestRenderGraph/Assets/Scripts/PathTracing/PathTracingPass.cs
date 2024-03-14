@@ -164,7 +164,6 @@ namespace UnityEngine.Rendering.Universal
             public int frameCount;
             public int bounceCount;
             public int maxSamples;
-            public Vector4 directionalLight;
 
             public bool restir;
             public ComputeBuffer restirBuffer;
@@ -283,39 +282,6 @@ namespace UnityEngine.Rendering.Universal
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
             UniversalCameraHistory history = cameraData.historyManager;
 
-            //Debug Pass
-            if (m_PathTracing.debugMode.value)
-            {
-                //_GBuffer0 is Albedo
-                //_GBuffer1 is SpecularMetallic
-                //_GBuffer2 is NormalSmoothness
-                //_GBuffer3 is Lighting
-                //_GBuffer4 is Depth
-
-                //Others in resourceData: cameraDepthTexture, motionVectorColor...
-
-                // Debug Enter Point
-                TextureHandle sourceTexture = resourceData.gBuffer[2];
-
-                TextureHandle destination = resourceData.activeColorTexture;
-
-                using (var builder = renderGraph.AddRasterRenderPass<DebugBlitData>("Debug Blit Pass", out var passData, m_ProfilingSampler))
-                {
-                    passData.blitMaterial = rayTracingResources.DebugBlitMaterial;
-                    builder.SetRenderAttachment(destination, 0);
-                    passData.sourceTexture = sourceTexture;
-                    builder.UseTexture(sourceTexture);
-
-                    builder.SetRenderFunc((DebugBlitData data, RasterGraphContext rgContext) =>
-                    {
-                        Blitter.BlitTexture(rgContext.cmd, data.sourceTexture, new Vector4(1, 1, 0, 0), data.blitMaterial, 0);
-                    });
-                }
-
-                return;
-            }
-            //-Debug Pass
-
             if (history == null)
             {
                 // Camera has no history data.
@@ -348,12 +314,6 @@ namespace UnityEngine.Rendering.Universal
                             convergenceStep = m_PathTracing.accumulation.value ? accumulationHistory.ConvergenceStep : 0;
 
                             Light sun = Object.FindObjectsByType<Light>(FindObjectsSortMode.None).Where(x => x.type == LightType.Directional).FirstOrDefault();
-                            //Vector4 directionalLight = new Vector4();
-                            //if(sun != null)
-                            //{
-                            //    Vector3 direction = -sun.transform.forward;
-                            //    directionalLight = new Vector4(direction.x, direction.y, direction.z, sun.intensity * 10);
-                            //}
 
                             using (var builder = renderGraph.AddRenderPass<PathTracingPassData>("Path Tracing pass", out var passData, m_ProfilingSampler))
                             {
@@ -377,15 +337,6 @@ namespace UnityEngine.Rendering.Universal
                                 passData.zoom = Mathf.Tan(Mathf.Deg2Rad * cameraData.camera.fieldOfView * 0.5f);
                                 passData.accelerationStructure = m_AccelerationStructure;
                                 passData.convergenceStep = convergenceStep;
-                                //passData.directionalLight = directionalLight;
-
-                                // Temporary buffers
-                                //passData.depthTexture = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                                //{
-                                //    colorFormat = GraphicsFormat.R32_SFloat,
-                                //    enableRandomWrite = true,
-                                //    name = "DepthBuffer"
-                                //});
 
                                 // Output buffers
                                 passData.output = builder.ReadWriteTexture(frameTexture);
@@ -401,7 +352,6 @@ namespace UnityEngine.Rendering.Universal
                                     ctx.cmd.SetRayTracingIntParam(data.shader, Shader.PropertyToID("g_ConvergenceStep"), data.convergenceStep);
                                     ctx.cmd.SetRayTracingIntParam(data.shader, Shader.PropertyToID("g_FrameIndex"), data.frameCount);
                                     ctx.cmd.SetRayTracingIntParam(data.shader, Shader.PropertyToID("g_MaxSamples"), data.maxSamples);
-                                    //ctx.cmd.SetRayTracingVectorParam(data.shader, Shader.PropertyToID("g_DirectionalLight"), data.directionalLight);
                                     ctx.cmd.SetRayTracingTextureParam(data.shader, Shader.PropertyToID("_DepthTex"), data.depthTexture);
                                     ctx.cmd.SetRayTracingTextureParam(data.shader, Shader.PropertyToID("_AlbedoBufferTex"), data.albedoBufferTexture);
                                     ctx.cmd.SetRayTracingTextureParam(data.shader, Shader.PropertyToID("_SpecularBufferTex"), data.specularBufferTexture);

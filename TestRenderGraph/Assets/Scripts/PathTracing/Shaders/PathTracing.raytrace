@@ -17,7 +17,6 @@ uint g_ConvergenceStep;
 uint g_FrameIndex;
 float g_Zoom;
 float g_AspectRatio;
-float4 g_DirectionalLight;
 uint g_BounceCountOpaque;
 uint g_BounceCountTransparent;
 uint g_MaxSamples;
@@ -84,12 +83,16 @@ void PathTracingRayGenShader()
 #define HYBRID_TRACING 1
 #if HYBRID_TRACING
     float depthValue = _DepthTex[launchIndex].r;
-    // This point is part of the background, we don't really care
+
+    // This point is part of the background
     if(depthValue == 0.0)
     {
-        g_Output[launchIndex] = 0;
+        float3 sampleDir = GetRayDirection(launchIndex + float2(0.5, 0.5), launchDim, false, rngState);
+        float3 envColor = g_EnvTex.SampleLevel(sampler_g_EnvTex, sampleDir, 0).xyz;
+        g_Output[launchIndex] = float4(envColor, 1);
         return;
-    }    
+    }
+
     // Get the material properties
     float4 albedo = _AlbedoBufferTex[launchIndex];
     float4 specualrMetallic = _SpecularBufferTex[launchIndex];
@@ -109,20 +112,21 @@ void PathTracingRayGenShader()
 
     // float3 fresnel = FresnelSchlick(viewWS, normalSmoothness.xyz, F0);
     float3 fresnel = evalFresnelSchlick(F0, float3(1, 1, 1), dot(viewWS, normalSmoothness.xyz));
-    float3 bounceDir_tangent, firstRadiance;
+    float3 bounceDir_tangent, gBufferRadiance;
     
-    float firstPdf = 0;
+    float gBufferPdf = 0;
     if(RandomFloat01(rngState) < normalSmoothness.w)
     {// specular
 		float2 u = float2(RandomFloat01(rngState), RandomFloat01(rngState));
-		bounceDir_tangent = SampleGGXReflection(view_tangent, roughness, roughness, u, firstPdf);
-		firstRadiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness);
+		bounceDir_tangent = SampleGGXReflection(view_tangent, roughness, roughness, u, gBufferPdf);
+        // We will divide pdf later.
+		gBufferRadiance = EvalGGXVNDF(view_tangent, bounceDir_tangent, albedo.xyz, roughness);
     }else
     {// diffuse
-        bounceDir_tangent = SampleCosineHemisphere(float3(0, 0, 1), rngState);
-		firstRadiance = albedo.xyz * K_INV_PI * dot(bounceDir_tangent, float3(0, 0, 1));
-
-        firstPdf = K_INV_PI * dot(bounceDir_tangent, float3(0, 0, 1));
+        bounceDir_tangent = SampleCosineHemisphere(float3(0, 0, 1), rngState);        
+        gBufferPdf = K_INV_PI * bounceDir_tangent.z;        
+        // We will divide pdf later.
+		gBufferRadiance = albedo.xyz * gBufferPdf;
     }
 
     // Compute the scattered vector on the surfaces | i.e. w_i
@@ -213,7 +217,7 @@ void PathTracingRayGenShader()
     if(!hit) throughput = float3(0, 0, 0);
 
 #if HYBRID_TRACING
-    throughput *= firstRadiance;
+    throughput *= gBufferRadiance;
 
     if(g_ClearBuffer > 0)
     {
@@ -239,10 +243,10 @@ void PathTracingRayGenShader()
         R.sample.sampleNormal = samplePointNormal;
         R.sample.radiance = throughput;
 
-        float pQ = Luminance(throughput) * rcp(firstPdf);
+        float pQ = Luminance(throughput) * rcp(gBufferPdf);
         R.w = pQ;
         R.M = 1;
-        R.Wout = firstPdf;
+        R.Wout = gBufferPdf;
 
         uint seed2 = g_FrameIndex * 7714523u + launchIndex.y * 7732u + launchIndex.x * 123;
         uint bufferId = launchIndex.y * launchDim.x + launchIndex.x;
@@ -281,14 +285,14 @@ void PathTracingRayGenShader()
     }
     else
     {
-        throughput *= rcp(firstPdf);
+        throughput *= rcp(gBufferPdf);
     }
 #endif
 
     // Accumulation?
     float3 prevRadiance = g_Output[launchIndex].xyz;
     float3 result = (g_ConvergenceStep == 0) ? throughput : lerp(prevRadiance, throughput, rcp(float(g_ConvergenceStep + 1)));
-    g_Output[launchIndex] = float4(saturate(result), 1);
+    g_Output[launchIndex] = float4(result, 1);
 }
 
 [shader("miss")]
