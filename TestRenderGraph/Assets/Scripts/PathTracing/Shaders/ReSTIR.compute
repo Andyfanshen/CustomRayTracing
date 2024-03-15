@@ -1,0 +1,77 @@
+#pragma kernel CSMain
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityGBuffer.hlsl"
+
+#include "includes/Utils.hlsl"
+#include "includes/Restir.hlsl"
+
+#define K_MAX_MOTION_DIST  0.1
+
+RWTexture2D<float4> g_Output;
+
+uint g_FrameIndex;
+uint width, height;
+uint g_ConvergenceStep;
+RWStructuredBuffer<Reservoir> _CurRestirBuffer;
+RWStructuredBuffer<Reservoir> _OldRestirBuffer;
+Texture2D<float4> _MotionVectorTex;
+
+bool IsValidNeighbour(in Reservoir prevReservoir, in Reservoir curReservoir, float2 motionVector)
+{
+    // strick --> boiling
+    // loose  --> waving
+    if(prevReservoir.M > 0 
+        //&& dot(motionVector, motionVector) < 0.005
+        //&& distance(prevReservoir.sample.viewPos, curReservoir.sample.viewPos) < K_MAX_MOTION_DIST
+        //&& dot(prevReservoir.sample.viewNormal, curReservoir.sample.viewNormal) > 0.9
+        )
+        return true;
+
+    return false;
+}
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // Initial random number generator seed for this pixel. The rngState will change every time we draw a random number.
+    uint rngState = uint(uint(id.x) * uint(1973) + uint(id.y) * uint(9277) + uint(g_FrameIndex) * uint(26699)) | uint(1);
+
+    uint bufferId = id.y * width + id.x;
+    Reservoir curReservoir = _CurRestirBuffer[bufferId];
+
+    // Background
+    if(curReservoir.M == 0) return;
+
+    // Temporal Reuse
+    float2 frameCoord = id.xy + float2(0.5, 0.5);
+    float2 frameUV = frameCoord / float2(width, height);
+    float2 motionVector = _MotionVectorTex[id.xy].xy;
+    uint2 prevIndex = floor((frameUV - motionVector) * float2(width, height));
+    
+    if(prevIndex.x > 0 && prevIndex.x < (width - 1) && prevIndex.y > 0 && prevIndex.y < (height - 1))
+    {
+        uint prevBufferId = prevIndex.y * width + prevIndex.x;
+        Reservoir prevReservoir = _OldRestirBuffer[prevBufferId];
+    
+        if(IsValidNeighbour(prevReservoir, curReservoir, motionVector))
+        {
+            ReservoirMerge(prevReservoir, curReservoir, RandomFloat01(rngState));
+            curReservoir = prevReservoir;
+        }
+    }    
+
+    _CurRestirBuffer[bufferId] = curReservoir;
+
+    // ReSTIR estimate: integral = f(X) * W_X
+    float3 radiance = curReservoir.sample.radiance * curReservoir.Wout;
+
+    // Accumulation?
+    float3 prevRadiance = g_Output[id.xy].xyz;
+    float3 result = (g_ConvergenceStep == 0) ? radiance : lerp(prevRadiance, radiance, rcp(float(g_ConvergenceStep + 1)));
+    g_Output[id.xy] = float4(result, 1);
+}

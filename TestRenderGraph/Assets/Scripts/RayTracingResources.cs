@@ -36,4 +36,14 @@ public class RayTracingResources : IRenderPipelineResources
         set => this.SetValueAndNotify(ref m_PathTracingRT, value);
     }
     #endregion
+
+    #region ReSTIR
+    [SerializeField, ResourcePath("Scripts/PathTracing/Shaders/ReSTIR.compute")]
+    private ComputeShader m_ReSTIRCS;
+    public ComputeShader ReSTIRCS
+    {
+        get => m_ReSTIRCS;
+        set => this.SetValueAndNotify(ref m_ReSTIRCS, value);
+    }
+    #endregion
 }

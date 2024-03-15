@@ -17,10 +17,10 @@ struct Reservoir
     float w, M, Wout;
 };
 
-void ReservoirUpdate(inout Reservoir reservoir, RestirSample sample, float w, float rand)
+void ReservoirUpdate(inout Reservoir reservoir, RestirSample sample, float w, float M, float rand)
 {
     reservoir.w += w;
-    reservoir.M += 1;
+    reservoir.M += M;
 
     if(reservoir.M > MAX_TEMPORAL_REUSE)
     {
@@ -36,10 +36,9 @@ void ReservoirUpdate(inout Reservoir reservoir, RestirSample sample, float w, fl
     reservoir.Wout = reservoir.w / (reservoir.M * Luminance(reservoir.sample.radiance));
 }
 
-void ReservoirMerge(inout Reservoir reservoir_1, in Reservoir reservoir_2, float p, float rand)
+void ReservoirMerge(inout Reservoir reservoir_1, in Reservoir reservoir_2, float rand)
 {
-    ReservoirUpdate(reservoir_1, reservoir_2.sample, p * reservoir_2.Wout * reservoir_2.M, rand);
-    reservoir_1.M = min(MAX_TEMPORAL_REUSE, reservoir_1.M + reservoir_2.M);
+    ReservoirUpdate(reservoir_1, reservoir_2.sample, Luminance(reservoir_2.sample.radiance) * reservoir_2.Wout * reservoir_2.M, reservoir_2.M, rand);
 }
 
 void ReservoirUpdate_spatial(inout Reservoir reservoir, RestirSample sample, int count, float w, float rand)

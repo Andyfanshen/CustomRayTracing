@@ -19,26 +19,25 @@ float g_Zoom;
 float g_AspectRatio;
 uint g_BounceCountOpaque;
 uint g_BounceCountTransparent;
-uint g_MaxSamples;
 int g_ReSTIR;
 int g_ClearBuffer;
+
+RaytracingAccelerationStructure g_AccelStruct : register(t0, space1);
+
+RWTexture2D<float4> g_Output : register(u0);
 
 TextureCube<float4> g_EnvTex;
 SamplerState sampler_g_EnvTex;
 
 Texture2D<float4> _DepthTex;
-SamplerState sampler__DepthTex;
 
 Texture2D<float4> _AlbedoBufferTex; // GBuffer_0
-SamplerState sampler__AlbedoBufferTex;
 
 Texture2D<float4> _SpecularBufferTex; // GBuffer_1
-SamplerState sampler__SpecularBufferTex;
 
 Texture2D<float4> _NormalBufferTex; // GBuffer_2
-SamplerState sampler__NormalBufferTex;
 
-RWStructuredBuffer<Reservoir> _RestirTemporalBuffer;
+RWStructuredBuffer<Reservoir> _RestirBuffer;
 
 #pragma max_recursion_depth 10
 
@@ -79,17 +78,48 @@ void PathTracingRayGenShader()
     
     // Initial random number generator seed for this pixel. The rngState will change every time we draw a random number.
     uint rngState = uint(uint(launchIndex.x) * uint(1973) + uint(launchIndex.y) * uint(9277) + uint(g_ConvergenceStep + g_FrameIndex) * uint(26699)) | uint(1);
+    
+    // Shoot rays through the center of a pixel.
+    float2 frameCoord = launchIndex + float2(0.5, 0.5);
 
 #define HYBRID_TRACING 1
 #if HYBRID_TRACING
     float depthValue = _DepthTex[launchIndex].r;
 
+    if(g_ClearBuffer)
+    {
+        // Clean Reservoirs
+        uint bufferId = launchIndex.y * launchDim.x + launchIndex.x;
+        Reservoir emptyReservoir;
+        emptyReservoir.sample.viewPos = float3(0, 0, 0);
+        emptyReservoir.sample.viewNormal = float3(0, 0, 0);
+        emptyReservoir.sample.samplePos = float3(0, 0, 0);
+        emptyReservoir.sample.sampleNormal = float3(0, 0, 0);
+        emptyReservoir.sample.radiance = float3(0, 0, 0);
+        emptyReservoir.w = 0;
+        emptyReservoir.M = 0;
+        emptyReservoir.Wout = 0;
+        _RestirBuffer[bufferId] = emptyReservoir;        
+    }
+
     // This point is part of the background
     if(depthValue == 0.0)
     {
-        float3 sampleDir = GetRayDirection(launchIndex + float2(0.5, 0.5), launchDim, false, rngState);
+        float3 sampleDir = GetRayDirection(frameCoord, launchDim, false, rngState);
         float3 envColor = g_EnvTex.SampleLevel(sampler_g_EnvTex, sampleDir, 0).xyz;
         g_Output[launchIndex] = float4(envColor, 1);
+
+        uint bufferId = launchIndex.y * launchDim.x + launchIndex.x;
+        Reservoir emptyReservoir;
+        emptyReservoir.sample.viewPos = float3(0, 0, 0);
+        emptyReservoir.sample.viewNormal = float3(0, 0, 0);
+        emptyReservoir.sample.samplePos = float3(0, 0, 0);
+        emptyReservoir.sample.sampleNormal = float3(0, 0, 0);
+        emptyReservoir.sample.radiance = float3(0, 0, 0);
+        emptyReservoir.w = 0;
+        emptyReservoir.M = 0;
+        emptyReservoir.Wout = 0;
+        _RestirBuffer[bufferId] = emptyReservoir;
         return;
     }
 
@@ -142,10 +172,7 @@ void PathTracingRayGenShader()
     float3 throughput = float3(1, 1, 1);
     float3 samplePointPos = float3(0, 0, 0);
     float3 samplePointNormal = float3(0, 0, 0);
-#else
-    // Shoot rays through the center of a pixel.
-    float2 frameCoord = launchIndex + float2(0.5, 0.5);
-    
+#else    
     float3 rayDirection = GetRayDirection(frameCoord, launchDim, true, rngState);    
 
     RayDesc ray;
@@ -219,21 +246,6 @@ void PathTracingRayGenShader()
 #if HYBRID_TRACING
     throughput *= gBufferRadiance;
 
-    if(g_ClearBuffer > 0)
-    {
-        uint bufferId = launchIndex.y * launchDim.x + launchIndex.x;
-        Reservoir emptyReservoir;
-        emptyReservoir.sample.viewPos = float3(0, 0, 0);
-        emptyReservoir.sample.viewNormal = float3(0, 0, 0);
-        emptyReservoir.sample.samplePos = float3(0, 0, 0);
-        emptyReservoir.sample.sampleNormal = float3(0, 0, 0);
-        emptyReservoir.sample.radiance = float3(0, 0, 0);
-        emptyReservoir.w = 0;
-        emptyReservoir.M = 0;
-        emptyReservoir.Wout = 0;
-        _RestirTemporalBuffer[bufferId] = emptyReservoir;
-    }
-
     if(g_ReSTIR > 0)
     {
         Reservoir R;
@@ -242,65 +254,40 @@ void PathTracingRayGenShader()
         R.sample.samplePos = samplePointPos;
         R.sample.sampleNormal = samplePointNormal;
         R.sample.radiance = throughput;
-
-        float pQ = Luminance(throughput) * rcp(gBufferPdf);
-        R.w = pQ;
+        // wi = p_hat(Xi) * W_Xi, mostly equlas Luminance(f(Xi)) * (1/pdf(Xi))
+        // R.w = Luminance(throughput) * rcp(gBufferPdf);
+        R.w = Luminance(throughput) * rcp(gBufferPdf);
         R.M = 1;
-        R.Wout = gBufferPdf;
+        R.Wout = rcp(gBufferPdf);
 
-        uint seed2 = g_FrameIndex * 7714523u + launchIndex.y * 7732u + launchIndex.x * 123;
         uint bufferId = launchIndex.y * launchDim.x + launchIndex.x;
-        Reservoir cur_reservoir = R;
-        Reservoir old_reservoir = _RestirTemporalBuffer[bufferId];
-        Reservoir temporal_reservoir = old_reservoir;
 
-        // spatial merge
-        // uint leftId = launchIndex.x > 0 ? bufferId - 1 : bufferId;
-        // uint rightId = launchIndex.x < (launchDim.x - 1) ? bufferId + 1 : bufferId;
-        // uint topId = launchIndex.y > 0 ? bufferId - launchDim.y : bufferId;
-        // uint bottomId = launchIndex.y < (launchDim.y - 1) ? bufferId + launchDim.y : bufferId;
-        // Reservoir old_reservoir_left = _RestirTemporalBuffer[leftId];
-        // Reservoir old_reservoir_right = _RestirTemporalBuffer[rightId];
-        // Reservoir old_reservoir_top = _RestirTemporalBuffer[topId];
-        // Reservoir old_reservoir_bottom = _RestirTemporalBuffer[bottomId];
-        // float old_reservoir_left_lum = Luminance(old_reservoir_left.sample.radiance);
-        // float old_reservoir_right_lum = Luminance(old_reservoir_right.sample.radiance);
-        // float old_reservoir_top_lum = Luminance(old_reservoir_top.sample.radiance);
-        // float old_reservoir_bottom_lum = Luminance(old_reservoir_bottom.sample.radiance);
-        // if(old_reservoir_left_lum > 0) ReservoirMerge_spatial(old_reservoir, old_reservoir_left, old_reservoir_left_lum, RandomFloat01(seed2));
-        // if(old_reservoir_right_lum > 0) ReservoirMerge_spatial(old_reservoir, old_reservoir_right, old_reservoir_right_lum, RandomFloat01(seed2));
-        // if(old_reservoir_top_lum > 0) ReservoirMerge_spatial(old_reservoir, old_reservoir_top, old_reservoir_top_lum, RandomFloat01(seed2));
-        // if(old_reservoir_bottom_lum > 0) ReservoirMerge_spatial(old_reservoir, old_reservoir_bottom, old_reservoir_bottom_lum, RandomFloat01(seed2));
-        // float old_reservoir_lum = Luminance(old_reservoir.sample.radiance);
-        // if(old_reservoir_lum > 0) old_reservoir.Wout = old_reservoir.w / (old_reservoir.M * old_reservoir_lum);
-        // else old_reservoir = temporal_reservoir;
-
-        // temporal merge
-        float w = cur_reservoir.w;
-        ReservoirUpdate(old_reservoir, cur_reservoir.sample, w, RandomFloat01(seed2));
-
-        _RestirTemporalBuffer[bufferId] = old_reservoir;
-
-        throughput = old_reservoir.sample.radiance * old_reservoir.Wout;
+        // current reservoir
+        _RestirBuffer[bufferId] = R;
     }
     else
     {
+        // Divide pdf to get the integral estimate.
         throughput *= rcp(gBufferPdf);
-    }
-#endif
 
+        // Accumulation?
+        float3 prevRadiance = g_Output[launchIndex].xyz;
+        float3 result = (g_ConvergenceStep == 0) ? throughput : lerp(prevRadiance, throughput, rcp(float(g_ConvergenceStep + 1)));
+        g_Output[launchIndex] = float4(result, 1);
+    }
+#else
     // Accumulation?
     float3 prevRadiance = g_Output[launchIndex].xyz;
     float3 result = (g_ConvergenceStep == 0) ? throughput : lerp(prevRadiance, throughput, rcp(float(g_ConvergenceStep + 1)));
     g_Output[launchIndex] = float4(result, 1);
+#endif
 }
 
 [shader("miss")]
 void MissShader0_Primary(inout PathPayload payload : SV_RayPayload)
 {
     payload.emission                = g_EnvTex.SampleLevel(sampler_g_EnvTex, WorldRayDirection(), 0).xyz;
-
-    payload.bounceIndexOpaque       = -1;
+    payload.bounceIndexOpaque       = K_MAX_BOUNCES;
 }
 
 #endif

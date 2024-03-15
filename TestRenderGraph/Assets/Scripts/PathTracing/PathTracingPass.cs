@@ -30,6 +30,7 @@ namespace UnityEngine.Rendering.Universal
 
             private const int MAX_BUFFERS_RESTIR = 2;
             private ComputeBuffer[] m_restirBuffers;
+            private int curRestirBufferId = 0;
 
             public override void OnCreate(BufferedRTHandleSystem owner, uint typeId)
             {
@@ -55,7 +56,7 @@ namespace UnityEngine.Rendering.Universal
                 m_restirBuffers = new ComputeBuffer[MAX_BUFFERS_RESTIR];
                 for (int i = 0; i < MAX_BUFFERS_RESTIR; i++)
                 {
-                    m_restirBuffers[i] = new ComputeBuffer(width * height, sizeof(float) * 15, ComputeBufferType.Structured);
+                    m_restirBuffers[i] = new ComputeBuffer(width * height, sizeof(float) * 18, ComputeBufferType.Structured);
                 }
             }
 
@@ -81,6 +82,14 @@ namespace UnityEngine.Rendering.Universal
                 m_DescKey = Hash128.Compute(0);
                 m_ConvergenceStep = 0;
                 m_prevCameraMatrix = Matrix4x4.identity;
+                if (m_restirBuffers != null)
+                {
+                    for (int i = 0; i < MAX_BUFFERS_RESTIR; i++)
+                    {
+                        m_restirBuffers[i].Release();
+                        m_restirBuffers[i].Dispose();
+                    }
+                }
             }
 
             public RTHandle GetAccumulationTexture()
@@ -88,9 +97,19 @@ namespace UnityEngine.Rendering.Universal
                 return GetCurrentFrameRT(m_AccumulationTextureId);
             }
 
-            public ComputeBuffer GetCurrentRestirBuffer(int gid)
+            public ComputeBuffer GetCurrentRestirBuffer()
             {
-                return m_restirBuffers[gid];
+                return m_restirBuffers[curRestirBufferId];
+            }
+
+            public ComputeBuffer GetOldRestirBuffer()
+            {
+                return m_restirBuffers[1 -  curRestirBufferId];
+            }
+
+            public void SwapRestirBuffer()
+            {
+                curRestirBufferId = 1 - curRestirBufferId;
             }
 
             private bool IsValid()
@@ -160,7 +179,6 @@ namespace UnityEngine.Rendering.Universal
             public float zoom;
             public float aspectRatio;
             public int convergenceStep;
-            public int frameIndex;
             public int frameCount;
             public int bounceCount;
             public int maxSamples;
@@ -176,17 +194,25 @@ namespace UnityEngine.Rendering.Universal
             public TextureHandle output;
         }
 
+        class ReSTIRPassData
+        {
+            public ComputeShader restirShader;
+
+            public int width, height;
+            public int frameCount;
+            public int convergenceStep;
+
+            public ComputeBuffer currentRestirBuffer;
+            public ComputeBuffer oldRestirBuffer;
+            public TextureHandle motionVectorTexture;
+            public TextureHandle output;
+        }
+
         class BlitPassData
         {
             public Material blitMaterial;
             public TextureHandle sourceTexture;
             public float convergenceRatio;
-        }
-
-        class DebugBlitData
-        {
-            public Material blitMaterial;
-            public TextureHandle sourceTexture;
         }
 
         internal RayTracingResources rayTracingResources { get; private set; }
@@ -305,6 +331,7 @@ namespace UnityEngine.Rendering.Universal
                         TextureHandle albedoBufferTexture = resourceData.gBuffer[0];
                         TextureHandle specularBufferTexture = resourceData.gBuffer[1];
                         TextureHandle normalBufferTexture = resourceData.gBuffer[2];
+                        TextureHandle motionVectorTexture = resourceData.motionVectorColor;
 
                         int convergenceStep = 0;
 
@@ -312,8 +339,6 @@ namespace UnityEngine.Rendering.Universal
                         if (accumulationHistory.ConvergenceStep < m_PathTracing.maximumSamples.value)
                         {
                             convergenceStep = m_PathTracing.accumulation.value ? accumulationHistory.ConvergenceStep : 0;
-
-                            Light sun = Object.FindObjectsByType<Light>(FindObjectsSortMode.None).Where(x => x.type == LightType.Directional).FirstOrDefault();
 
                             using (var builder = renderGraph.AddRenderPass<PathTracingPassData>("Path Tracing pass", out var passData, m_ProfilingSampler))
                             {
@@ -325,7 +350,7 @@ namespace UnityEngine.Rendering.Universal
                                 passData.specularBufferTexture = builder.ReadTexture(specularBufferTexture);
                                 passData.normalBufferTexture = builder.ReadTexture(normalBufferTexture);
                                 passData.restir = m_PathTracing.restir.value;
-                                passData.restirBuffer = accumulationHistory.GetCurrentRestirBuffer(0);
+                                passData.restirBuffer = accumulationHistory.GetCurrentRestirBuffer();
                                 passData.clearBuffer = m_PathTracing.clearRestirBuffer.value;
                                 passData.bounceCount = m_PathTracing.bounceCount.value;
                                 passData.maxSamples = m_PathTracing.maximumSamples.value;
@@ -351,23 +376,64 @@ namespace UnityEngine.Rendering.Universal
                                     ctx.cmd.SetRayTracingFloatParam(data.shader, Shader.PropertyToID("g_AspectRatio"), data.aspectRatio);
                                     ctx.cmd.SetRayTracingIntParam(data.shader, Shader.PropertyToID("g_ConvergenceStep"), data.convergenceStep);
                                     ctx.cmd.SetRayTracingIntParam(data.shader, Shader.PropertyToID("g_FrameIndex"), data.frameCount);
-                                    ctx.cmd.SetRayTracingIntParam(data.shader, Shader.PropertyToID("g_MaxSamples"), data.maxSamples);
                                     ctx.cmd.SetRayTracingTextureParam(data.shader, Shader.PropertyToID("_DepthTex"), data.depthTexture);
                                     ctx.cmd.SetRayTracingTextureParam(data.shader, Shader.PropertyToID("_AlbedoBufferTex"), data.albedoBufferTexture);
                                     ctx.cmd.SetRayTracingTextureParam(data.shader, Shader.PropertyToID("_SpecularBufferTex"), data.specularBufferTexture);
                                     ctx.cmd.SetRayTracingTextureParam(data.shader, Shader.PropertyToID("_NormalBufferTex"), data.normalBufferTexture);
                                     ctx.cmd.SetRayTracingIntParam(data.shader, Shader.PropertyToID("g_ReSTIR"), passData.restir ? 1 : 0);
                                     ctx.cmd.SetRayTracingIntParam(data.shader, Shader.PropertyToID("g_ClearBuffer"), passData.clearBuffer ? 1 : 0);
-                                    ctx.cmd.SetRayTracingBufferParam(data.shader, Shader.PropertyToID("_RestirTemporalBuffer"), data.restirBuffer);
+                                    ctx.cmd.SetRayTracingBufferParam(data.shader, Shader.PropertyToID("_RestirBuffer"), data.restirBuffer);
                                     ctx.cmd.SetRayTracingTextureParam(data.shader, Shader.PropertyToID("g_EnvTex"), data.envTexture);
                                     ctx.cmd.SetRayTracingTextureParam(data.shader, Shader.PropertyToID("g_Output"), data.output);
 
                                     ctx.cmd.DispatchRays(data.shader, "PathTracingRayGenShader", (uint)data.width, (uint)data.height, 1);
                                 });
                             }
+
+                            // ReSTIR Pass
+                            if (m_PathTracing.restir.value)
+                            {
+                                using (var builder = renderGraph.AddComputePass<ReSTIRPassData>("ReSTIR Pass", out var passData, m_ProfilingSampler))
+                                {
+                                    passData.restirShader = rayTracingResources.ReSTIRCS;
+                                    passData.width = cameraData.camera.pixelWidth;
+                                    passData.height = cameraData.camera.pixelHeight;
+                                    passData.convergenceStep = convergenceStep;
+                                    passData.frameCount = Time.frameCount;
+                                    passData.currentRestirBuffer = accumulationHistory.GetCurrentRestirBuffer();
+                                    passData.oldRestirBuffer = accumulationHistory.GetOldRestirBuffer();
+
+                                    builder.UseTexture(motionVectorTexture, AccessFlags.Read);
+                                    passData.motionVectorTexture = motionVectorTexture;
+
+                                    // Output buffers
+                                    builder.UseTexture(frameTexture, AccessFlags.ReadWrite);
+                                    passData.output = frameTexture;
+
+                                    builder.SetRenderFunc((ReSTIRPassData data, ComputeGraphContext ctx) =>
+                                    {
+                                        const int kernel = 0;
+                                        ctx.cmd.SetComputeBufferParam(data.restirShader, kernel, Shader.PropertyToID("_CurRestirBuffer"), data.currentRestirBuffer);
+                                        ctx.cmd.SetComputeBufferParam(data.restirShader, kernel, Shader.PropertyToID("_OldRestirBuffer"), data.oldRestirBuffer);
+                                        ctx.cmd.SetComputeIntParam(data.restirShader, Shader.PropertyToID("width"), data.width);
+                                        ctx.cmd.SetComputeIntParam(data.restirShader, Shader.PropertyToID("height"), data.height);
+                                        ctx.cmd.SetComputeIntParam(data.restirShader, Shader.PropertyToID("g_ConvergenceStep"), data.convergenceStep);
+                                        ctx.cmd.SetComputeIntParam(data.restirShader, Shader.PropertyToID("g_FrameIndex"), data.frameCount);
+                                        ctx.cmd.SetComputeTextureParam(data.restirShader, kernel, Shader.PropertyToID("_MotionVectorTex"), data.motionVectorTexture);
+                                        ctx.cmd.SetComputeTextureParam(data.restirShader, kernel, Shader.PropertyToID("g_Output"), data.output);
+                                        ctx.cmd.DispatchCompute(data.restirShader, kernel, (data.width + 7) / 8, (data.height + 7) / 8, 1);
+                                    });
+                                }
+
+                                accumulationHistory.SwapRestirBuffer();
+                            }
+
+                            // Clear Restir Buffer
+                            if (m_PathTracing.clearRestirBuffer.value) accumulationHistory.SwapRestirBuffer();
                         }
 
-                        using (var builder = renderGraph.AddRasterRenderPass<BlitPassData>("Blit Path Tracing Result", out var passData, m_ProfilingSampler))
+                        // Blit Pass
+                        using (var builder = renderGraph.AddRasterRenderPass<BlitPassData>("Blit Path Tracing pass", out var passData, m_ProfilingSampler))
                         {
                             passData.blitMaterial = rayTracingResources.BlitMaterial;
 
