@@ -324,3 +324,4 @@ MonoBehaviour:
           type: 3}
         m_PathTracingRT: {fileID: 4807578003741378534, guid: 3c75600b352173f40a820b3de4f51f25,
           type: 3}
+        m_ReSTIRCS: {fileID: 7200000, guid: a3355ec535d260f4483a3fa8661fe25c, type: 3}

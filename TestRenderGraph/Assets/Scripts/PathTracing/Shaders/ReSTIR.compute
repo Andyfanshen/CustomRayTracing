@@ -51,10 +51,10 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     float2 frameCoord = id.xy + float2(0.5, 0.5);
     float2 frameUV = frameCoord / float2(width, height);
     float2 motionVector = _MotionVectorTex[id.xy].xy;
-    uint2 prevIndex = floor((frameUV - motionVector) * float2(width, height));
-    
-    if(prevIndex.x > 0 && prevIndex.x < (width - 1) && prevIndex.y > 0 && prevIndex.y < (height - 1))
+    float2 prevUV = frameUV - motionVector;
+    if(prevUV.x > 0 && prevUV.x < 1 && prevUV.y > 0 && prevUV.y < 1)
     {
+        uint2 prevIndex = floor(prevUV * float2(width, height));
         uint prevBufferId = prevIndex.y * width + prevIndex.x;
         Reservoir prevReservoir = _OldRestirBuffer[prevBufferId];
     
@@ -63,7 +63,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
             ReservoirMerge(prevReservoir, curReservoir, RandomFloat01(rngState));
             curReservoir = prevReservoir;
         }
-    }    
+    } 
 
     _CurRestirBuffer[bufferId] = curReservoir;
 
