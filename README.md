@@ -3,9 +3,9 @@
 - Developed with [**RenderGraph API**](https://docs.unity3d.com/Packages/com.unity.render-pipelines.core@17.0/manual/render-graph-system.html)
 - Path tracing pass **Injected** as volume component
 - Support URP Lit.shader & ComplexLit.shader (Modified)
-- Support Hybrid ray tracing (Path Tracing from G-Buffer)
+- Support Hybrid ray tracing (Path Tracing from G-Buffer, Temporal reuse with motion vector)
 - Support [Bounded VNDF sampling for smith-GGX reflections](https://dl.acm.org/doi/10.1145/3610543.3626163)
-- Support temporal reuse ReSTIR (motion vector not used yet)
+- Support temporal reuse ReSTIR (motion vector used)
 
 ### Pictures
 
