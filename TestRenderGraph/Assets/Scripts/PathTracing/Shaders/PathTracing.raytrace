@@ -53,7 +53,7 @@ float4 DecodeNormalBuffer(uint2 texcoord)
 
 float3 GetRayDirection(float2 frameCoord, uint2 launchDim, bool jit, inout uint seed)
 {
-    // Plus a jitter for anti-aliasing. | Only works for frames-accumulating.
+    // Plus a jitter for anti-aliasing. Only works for frames-accumulating.
     float2 ndcCoords = (frameCoord + 
         (jit ? float2(RandomFloat01(seed), RandomFloat01(seed)) : float2(0, 0))
         - float2(0.5, 0.5))
@@ -66,8 +66,7 @@ float3 GetRayDirection(float2 frameCoord, uint2 launchDim, bool jit, inout uint 
     float3 viewDirection = normalize(float3(ndcCoords.x * g_AspectRatio, ndcCoords.y, 1));
 
     // Rotate the ray from view space to world space.
-    return mul((float3x3)unity_CameraToWorld, viewDirection);    
-    // float3 rayDirection = mul((float3x3)g_PrevCameraMatrix, float3(viewDirection.x, viewDirection.y, -viewDirection.z));
+    return mul((float3x3)unity_CameraToWorld, viewDirection);
 }
 
 [shader("raygeneration")]
@@ -244,8 +243,6 @@ void PathTracingRayGenShader()
     if(!hit) throughput = float3(0, 0, 0);
 
 #if HYBRID_TRACING
-    throughput *= gBufferRadiance;
-
     if(g_ReSTIR > 0)
     {
         Reservoir R;
@@ -255,18 +252,22 @@ void PathTracingRayGenShader()
         R.sample.sampleNormal = samplePointNormal;
         R.sample.radiance = throughput;
         // wi = p_hat(Xi) * W_Xi, mostly equlas Luminance(f(Xi)) * (1/pdf(Xi))
-        // R.w = Luminance(throughput) * rcp(gBufferPdf);
-        R.w = Luminance(throughput) * rcp(gBufferPdf);
+        R.w = Luminance(throughput);
         R.M = 1;
-        R.Wout = rcp(gBufferPdf);
+        R.Wout = 1;
 
         uint bufferId = launchIndex.y * launchDim.x + launchIndex.x;
 
         // current reservoir
         _RestirBuffer[bufferId] = R;
+
+        // cache GBuffer radiance (the first radiance)
+        g_Output[launchIndex] = float4(gBufferRadiance * rcp(gBufferPdf), 1);
     }
     else
     {
+        throughput *= gBufferRadiance;
+
         // Divide pdf to get the integral estimate.
         throughput *= rcp(gBufferPdf);
 

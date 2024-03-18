@@ -1,4 +1,5 @@
 #pragma kernel CSMain
+#pragma kernel Spatial
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
@@ -8,6 +9,7 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityGBuffer.hlsl"
 
 #include "includes/Utils.hlsl"
+#include "includes/BRDF.hlsl"
 #include "includes/Restir.hlsl"
 
 #define K_MAX_MOTION_DIST  0.1
@@ -17,24 +19,55 @@ RWTexture2D<float4> g_Output;
 uint g_FrameIndex;
 uint width, height;
 uint g_ConvergenceStep;
+
+float g_Zoom;
+float g_AspectRatio;
+
+float3 g_prevCameraPos;
+float4x4 g_PrevWorldToCameraMatrix;
+
 RWStructuredBuffer<Reservoir> _CurRestirBuffer;
 RWStructuredBuffer<Reservoir> _OldRestirBuffer;
 Texture2D<float4> _MotionVectorTex;
 
-bool IsValidNeighbour(in Reservoir prevReservoir, in Reservoir curReservoir, float2 motionVector)
+float2 GetLastFrameUV(float3 viewPointPos)
+{
+    float3 rayWS = normalize(viewPointPos - g_prevCameraPos);
+
+    // Get view space ray in last frame
+    float3 prevRayCS = normalize(mul((float3x3)g_PrevWorldToCameraMatrix, rayWS));
+    prevRayCS *= rcp(prevRayCS.z);
+
+    float2 prevNdcCoords = float2(prevRayCS.x / g_AspectRatio, prevRayCS.y);
+    prevNdcCoords /= g_Zoom;
+    float2 prevUV = (prevNdcCoords + float2(1, 1)) / 2;
+
+    return float2(1, 1) - prevUV;
+}
+
+bool IsValidTemporalNeighbour(in Reservoir prevReservoir, in Reservoir curReservoir, float2 motionVector)
 {
     // strick --> boiling
     // loose  --> waving
-    if(prevReservoir.M > 0 
-        //&& dot(motionVector, motionVector) < 0.005
-        //&& distance(prevReservoir.sample.viewPos, curReservoir.sample.viewPos) < K_MAX_MOTION_DIST
-        //&& dot(prevReservoir.sample.viewNormal, curReservoir.sample.viewNormal) > 0.9
+    if(prevReservoir.M > 0
+        //&& Luminance(prevReservoir.sample.radiance) > 0
+        //&& dot(motionVector, motionVector) < 1e-3
+        &&
+            (
+            dot(prevReservoir.sample.viewNormal, curReservoir.sample.viewNormal) > 0.8
+            || dot(motionVector, motionVector) < 1e-9
+            )
         )
-        return true;
+        {
+            return true;
+        }
 
     return false;
 }
 
+// Temporal Reuse.
+// Input  : _CurRestirBuffer & _OldRestirBuffer
+// Output : _CurRestirBuffer
 [numthreads(8,8,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
@@ -48,30 +81,115 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     if(curReservoir.M == 0) return;
 
     // Temporal Reuse
+#define MOTION_VECTOR 1
+#if MOTION_VECTOR
+    // Use Motion Vector
     float2 frameCoord = id.xy + float2(0.5, 0.5);
     float2 frameUV = frameCoord / float2(width, height);
     float2 motionVector = _MotionVectorTex[id.xy].xy;
     float2 prevUV = frameUV - motionVector;
+
     if(prevUV.x > 0 && prevUV.x < 1 && prevUV.y > 0 && prevUV.y < 1)
     {
         uint2 prevIndex = floor(prevUV * float2(width, height));
         uint prevBufferId = prevIndex.y * width + prevIndex.x;
         Reservoir prevReservoir = _OldRestirBuffer[prevBufferId];
     
-        if(IsValidNeighbour(prevReservoir, curReservoir, motionVector))
+        if(IsValidTemporalNeighbour(prevReservoir, curReservoir, motionVector))
         {
             ReservoirMerge(prevReservoir, curReservoir, RandomFloat01(rngState));
             curReservoir = prevReservoir;
         }
-    } 
+    }
+#else
+    // Use Reprojection
+    float2 frameCoord = id.xy + float2(0.5, 0.5);
+    float2 frameUV = frameCoord / float2(width, height);
+    float2 prevUV = GetLastFrameUV(curReservoir.sample.viewPos);
+    float2 motionVector = (frameUV - prevUV);
+
+    if(prevUV.x > 0 && prevUV.x < 1 && prevUV.y > 0 && prevUV.y < 1)
+    {
+        uint2 prevIndex = floor(prevUV * float2(width, height));
+        uint prevBufferId = prevIndex.y * width + prevIndex.x;
+        Reservoir prevReservoir = _OldRestirBuffer[prevBufferId];
+    
+        if(IsValidTemporalNeighbour(prevReservoir, curReservoir, motionVector))
+        {
+            ReservoirMerge(prevReservoir, curReservoir, RandomFloat01(rngState));
+            curReservoir = prevReservoir;
+        }
+    }
+#endif
 
     _CurRestirBuffer[bufferId] = curReservoir;
 
     // ReSTIR estimate: integral = f(X) * W_X
-    float3 radiance = curReservoir.sample.radiance * curReservoir.Wout;
+    //float3 radiance = curReservoir.sample.radiance * curReservoir.Wout;
+    //float3 result = g_Output[id.xy].xyz * radiance;
 
-    // Accumulation?
-    float3 prevRadiance = g_Output[id.xy].xyz;
-    float3 result = (g_ConvergenceStep == 0) ? radiance : lerp(prevRadiance, radiance, rcp(float(g_ConvergenceStep + 1)));
+    // Since ReSTIR needs g_Output to cache the GBuffer radiance, accumulation not support yet.
+    // If spatial reuse enabled, not set g_Output. It is postponed to spatial reuse.
+    //g_Output[id.xy] = float4(result, 1);
+}
+
+bool IsValidSpatialNeighbour(in Reservoir curReservoir, in Reservoir neighbourReservoir)
+{
+    // strick --> boiling
+    // loose  --> waving
+    if(neighbourReservoir.M > 0
+        && dot(neighbourReservoir.sample.viewNormal, curReservoir.sample.viewNormal) > 0.8
+        )
+        {
+            return true;
+        }
+
+    return false;
+}
+
+
+// Spatial Reuse
+// Input  : _OldRestirBuffer
+// Output : _CurRestirBuffer
+[numthreads(8,8,1)]
+void Spatial (uint3 id : SV_DispatchThreadID)
+{
+    // Initial random number generator seed for this pixel. The rngState will change every time we draw a random number.
+    uint rngState = uint(uint(id.x) * uint(1973) + uint(id.y) * uint(9277) + uint(g_FrameIndex) * uint(26699)) | uint(1);
+
+    uint bufferId = id.y * width + id.x;
+    Reservoir curReservoir = _OldRestirBuffer[bufferId];
+
+    // Background
+    if(curReservoir.M == 0) return;
+
+    // Spatial Reuse | Need an additional pass.
+    //uint2 leftId = uint2(id.x > 0 ? id.x - 1 : id.x, id.y);
+    //uint2 rightId = uint2(id.x < width - 1 ? id.x + 1 : id.x, id.y);
+    //uint2 topId = uint2(id.x, id.y < height - 1 ? id.y + 1 : id.y);
+    //uint2 bottomId = uint2(id.x, id.y > 0 ? id.y - 1 : id.y);
+    //uint leftBufferId = leftId.y * width + leftId.x;
+    //uint rightBufferId = rightId.y * width + rightId.x;
+    //uint topBufferId = topId.y * width + topId.x;
+    //uint bottomBufferId = bottomId.y * width + bottomId.x;
+    //Reservoir leftReservoir = _OldRestirBuffer[leftBufferId];
+    //Reservoir rightReservoir = _OldRestirBuffer[rightBufferId];
+    //Reservoir topReservoir = _OldRestirBuffer[topBufferId];
+    //Reservoir bottomReservoir = _OldRestirBuffer[bottomBufferId];
+
+    //leftReservoir.M = 1; leftReservoir.Wout = 1;
+    //if(IsValidSpatialNeighbour(curReservoir, leftReservoir)) ReservoirMerge(curReservoir, leftReservoir, RandomFloat01(rngState));
+    //if(IsValidSpatialNeighbour(curReservoir, rightReservoir)) ReservoirMerge(curReservoir, rightReservoir, RandomFloat01(rngState));
+    //if(IsValidSpatialNeighbour(curReservoir, topReservoir)) ReservoirMerge(curReservoir, topReservoir, RandomFloat01(rngState));
+    //if(IsValidSpatialNeighbour(curReservoir, bottomReservoir)) ReservoirMerge(curReservoir, bottomReservoir, RandomFloat01(rngState));
+
+    // Must be here
+    _CurRestirBuffer[bufferId] = curReservoir;
+
+    // ReSTIR estimate: integral = f(X) * W_X
+    float3 radiance = curReservoir.sample.radiance * curReservoir.Wout;
+    float3 result = g_Output[id.xy].xyz * radiance;
+
+    // Since ReSTIR needs g_Output to cache the GBuffer radiance, accumulation not support yet.
     g_Output[id.xy] = float4(result, 1);
 }
