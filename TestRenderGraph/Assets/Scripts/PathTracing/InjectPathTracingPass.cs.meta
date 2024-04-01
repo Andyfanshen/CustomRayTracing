@@ -1,2 +1,15 @@
 fileFormatVersion: 2
 guid: 1994f52ab358db64ea50abab3a601ed1
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - blitMat: {fileID: 2100000, guid: 114229bf51121794cb2605f380c3dd0a, type: 2}
+  - pathTracingRT: {fileID: 4807578003741378534, guid: 3c75600b352173f40a820b3de4f51f25,
+      type: 3}
+  - restirCS: {fileID: 7200000, guid: a3355ec535d260f4483a3fa8661fe25c, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

@@ -4,7 +4,6 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {
-
     [ExecuteInEditMode]
     public class InjectPathTracingPass : MonoBehaviour
     {

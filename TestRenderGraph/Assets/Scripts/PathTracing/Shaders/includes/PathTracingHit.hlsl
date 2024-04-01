@@ -97,7 +97,7 @@ void ClosestHitMain(inout PathPayload payload : SV_RayPayload, AttributeData att
 #endif
 
 #if _EMISSION
-	emission = _EmissionColor * _EmissionMap.SampleLevel(sampler__EmissionMap, _EmissionMap_ST.xy * v.uv + _EmissionMap_ST.zw, 0).xyz;
+	emission = _EmissionColor.xyz * _EmissionMap.SampleLevel(sampler__EmissionMap, _EmissionMap_ST.xy * v.uv + _EmissionMap_ST.zw, 0).xyz;
 #endif
 
 	metallic = clamp(metallic, 1e-4, 1 - 1e-4);

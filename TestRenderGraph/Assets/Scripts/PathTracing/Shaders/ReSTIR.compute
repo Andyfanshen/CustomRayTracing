@@ -50,7 +50,7 @@ bool IsValidTemporalNeighbour(in Reservoir prevReservoir, in Reservoir curReserv
     // strick --> boiling
     // loose  --> waving
     if(prevReservoir.M > 0
-        //&& Luminance(prevReservoir.sample.radiance) > 0
+        && Luminance(prevReservoir.sample.radiance) > 0
         //&& dot(motionVector, motionVector) < 1e-3
         &&
             (
@@ -122,15 +122,71 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     }
 #endif
 
+    if(Luminance(curReservoir.sample.radiance) == 0)
+    {
+        Reservoir emptyReservoir;
+        emptyReservoir.sample.viewPos = float3(0, 0, 0);
+        emptyReservoir.sample.viewNormal = float3(0, 0, 0);
+        emptyReservoir.sample.samplePos = float3(0, 0, 0);
+        emptyReservoir.sample.sampleNormal = float3(0, 0, 0);
+        emptyReservoir.sample.radiance = float3(0, 0, 0);
+        emptyReservoir.w = 0;
+        emptyReservoir.M = 0;
+        emptyReservoir.Wout = 1;
+        curReservoir = emptyReservoir;
+    }
     _CurRestirBuffer[bufferId] = curReservoir;
 
     // ReSTIR estimate: integral = f(X) * W_X
-    //float3 radiance = curReservoir.sample.radiance * curReservoir.Wout;
-    //float3 result = g_Output[id.xy].xyz * radiance;
+    float3 radiance = curReservoir.sample.radiance * curReservoir.Wout;
+
+    // Should not be NaN, why?
+    if(isnan(radiance.x) || isnan(radiance.y) || isnan(radiance.z))
+    {
+        radiance = float3(0.63, 0.63, 0.63);
+    }
+
+    float3 result = g_Output[id.xy].xyz * radiance;
+    //if(isnan(radiance.x) || isnan(radiance.y) || isnan(radiance.z))
+    //{
+    //    result = float3(0, 0, 1);
+    //}
+    //if(isnan(curReservoir.sample.radiance.x) || isnan(curReservoir.sample.radiance.y) || isnan(curReservoir.sample.radiance.z))
+    //{
+    //    result = float3(0, 0, 1);
+    //}
+    //if(isnan(curReservoir.Wout))
+    //{
+    //    result = float3(0, 0, 1);
+    //}
+    //if(isinf(curReservoir.sample.radiance.x) || isinf(curReservoir.sample.radiance.y) || isinf(curReservoir.sample.radiance.z))
+    //{
+    //    result = float3(0, 0, 1);
+    //}
+    //if(isinf(curReservoir.Wout))
+    //{
+    //    result = float3(0, 0, 1);
+    //}
+    //if(Luminance(curReservoir.sample.radiance) < 1e-4)
+    //{
+    //    result = float3(0, 0, 1);
+    //}
+    //if(curReservoir.Wout < 1e-4)
+    //{
+    //    result = float3(0, 0, 1);
+    //}
+    //if(curReservoir.sample.radiance.x == 0 || curReservoir.sample.radiance.y == 0 || curReservoir.sample.radiance.z == 0)
+    //{
+    //    result = float3(0, 0, 1);
+    //}
+    //if(curReservoir.Wout == 0)
+    //{
+    //    result = float3(0, 0, 1);
+    //}
 
     // Since ReSTIR needs g_Output to cache the GBuffer radiance, accumulation not support yet.
     // If spatial reuse enabled, not set g_Output. It is postponed to spatial reuse.
-    //g_Output[id.xy] = float4(result, 1);
+    g_Output[id.xy] = float4(result, 1);
 }
 
 bool IsValidSpatialNeighbour(in Reservoir curReservoir, in Reservoir neighbourReservoir)
@@ -164,31 +220,55 @@ void Spatial (uint3 id : SV_DispatchThreadID)
     if(curReservoir.M == 0) return;
 
     // Spatial Reuse | Need an additional pass.
-    //uint2 leftId = uint2(id.x > 0 ? id.x - 1 : id.x, id.y);
-    //uint2 rightId = uint2(id.x < width - 1 ? id.x + 1 : id.x, id.y);
-    //uint2 topId = uint2(id.x, id.y < height - 1 ? id.y + 1 : id.y);
-    //uint2 bottomId = uint2(id.x, id.y > 0 ? id.y - 1 : id.y);
-    //uint leftBufferId = leftId.y * width + leftId.x;
-    //uint rightBufferId = rightId.y * width + rightId.x;
-    //uint topBufferId = topId.y * width + topId.x;
-    //uint bottomBufferId = bottomId.y * width + bottomId.x;
-    //Reservoir leftReservoir = _OldRestirBuffer[leftBufferId];
-    //Reservoir rightReservoir = _OldRestirBuffer[rightBufferId];
-    //Reservoir topReservoir = _OldRestirBuffer[topBufferId];
-    //Reservoir bottomReservoir = _OldRestirBuffer[bottomBufferId];
+    uint2 leftId = uint2(id.x > 0 ? id.x - 1 : id.x, id.y);
+    uint2 rightId = uint2(id.x < width - 1 ? id.x + 1 : id.x, id.y);
+    uint2 topId = uint2(id.x, id.y < height - 1 ? id.y + 1 : id.y);
+    uint2 bottomId = uint2(id.x, id.y > 0 ? id.y - 1 : id.y);
+    uint leftBufferId = leftId.y * width + leftId.x;
+    uint rightBufferId = rightId.y * width + rightId.x;
+    uint topBufferId = topId.y * width + topId.x;
+    uint bottomBufferId = bottomId.y * width + bottomId.x;
+    Reservoir leftReservoir = _OldRestirBuffer[leftBufferId];
+    Reservoir rightReservoir = _OldRestirBuffer[rightBufferId];
+    Reservoir topReservoir = _OldRestirBuffer[topBufferId];
+    Reservoir bottomReservoir = _OldRestirBuffer[bottomBufferId];
 
-    //leftReservoir.M = 1; leftReservoir.Wout = 1;
+    Reservoir emptyReservoir;
+    emptyReservoir.sample.viewPos = float3(0, 0, 0);
+    emptyReservoir.sample.viewNormal = float3(0, 0, 0);
+    emptyReservoir.sample.samplePos = float3(0, 0, 0);
+    emptyReservoir.sample.sampleNormal = float3(0, 0, 0);
+    emptyReservoir.sample.radiance = float3(1, 0, 1);
+    emptyReservoir.w = 0;
+    emptyReservoir.M = 0;
+    emptyReservoir.Wout = 0;
+
+    if(curReservoir.M > 0)
+    {
+        ReservoirUpdate_spatial(emptyReservoir, curReservoir, RandomFloat01(rngState));
+        emptyReservoir.M = curReservoir.M;
+        emptyReservoir.Wout = emptyReservoir.w * rcp(emptyReservoir.M * Luminance(emptyReservoir.sample.radiance));
+        curReservoir = emptyReservoir;
+    }
+
+    //Reservoir copyReservoir = curReservoir;
     //if(IsValidSpatialNeighbour(curReservoir, leftReservoir)) ReservoirMerge(curReservoir, leftReservoir, RandomFloat01(rngState));
     //if(IsValidSpatialNeighbour(curReservoir, rightReservoir)) ReservoirMerge(curReservoir, rightReservoir, RandomFloat01(rngState));
     //if(IsValidSpatialNeighbour(curReservoir, topReservoir)) ReservoirMerge(curReservoir, topReservoir, RandomFloat01(rngState));
     //if(IsValidSpatialNeighbour(curReservoir, bottomReservoir)) ReservoirMerge(curReservoir, bottomReservoir, RandomFloat01(rngState));
 
-    // Must be here
+    // Must be here to swap ReSTIR Buffer
     _CurRestirBuffer[bufferId] = curReservoir;
 
-    // ReSTIR estimate: integral = f(X) * W_X
-    float3 radiance = curReservoir.sample.radiance * curReservoir.Wout;
-    float3 result = g_Output[id.xy].xyz * radiance;
+    // ReSTIR estimate: integral = f(X) * W_X    
+    float3 radiance = curReservoir.sample.radiance;// * curReservoir.Wout;
+    if(Luminance(curReservoir.sample.radiance) == 0)
+    {
+        radiance = float3(1, 0, 1);
+    }
+
+    float3 result = radiance;
+    //float3 result = g_Output[id.xy].xyz * radiance;
 
     // Since ReSTIR needs g_Output to cache the GBuffer radiance, accumulation not support yet.
     g_Output[id.xy] = float4(result, 1);

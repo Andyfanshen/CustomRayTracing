@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
+[ExecuteInEditMode]
 public class InjectColorInvertPass : MonoBehaviour
 {
     public Material InvertColorMaterial;
