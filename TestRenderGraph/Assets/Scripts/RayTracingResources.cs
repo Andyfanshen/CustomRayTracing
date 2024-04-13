@@ -13,14 +13,14 @@ public class RayTracingResources : IRenderPipelineResources
     public int version => 0;
 
 #if UNITY_EDITOR
-    [SerializeField, ResourcePath("Assets/Scripts/PathTracing/Shaders/PathTracingBlit.shader")]
+    [SerializeField, ResourcePath("Scripts/PathTracing/Shaders/PathTracingBlit.shader")]
     private Shader blitShader;
     public Material BlitMaterial
     {
         get => new Material(blitShader);
     }
 
-    [SerializeField, ResourcePath("Assets/Scripts/PathTracing/Shaders/DebugBlit.shader")]
+    [SerializeField, ResourcePath("Scripts/PathTracing/Shaders/DebugBlit.shader")]
     private Shader debugBlitShader;
     public Material DebugBlitMaterial
     {

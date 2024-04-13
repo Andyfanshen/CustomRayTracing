@@ -46,9 +46,14 @@ namespace UnityEngine.Rendering.Universal
                 {
                     for (int i = 0; i < MAX_BUFFERS_RESTIR; i++)
                     {
-                        m_restirBuffers[i].Release();
-                        m_restirBuffers[i].Dispose();
+                        if (m_restirBuffers[i] != null)
+                        {
+                            m_restirBuffers[i].Release();
+                            m_restirBuffers[i].Dispose();
+                        }
+                        m_restirBuffers[i] = null;
                     }
+                    m_restirBuffers = null;
                 }
 
                 // Alloc ReSTIR Buffer
