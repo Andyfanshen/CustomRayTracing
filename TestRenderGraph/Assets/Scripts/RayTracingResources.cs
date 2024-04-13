@@ -29,7 +29,7 @@ public class RayTracingResources : IRenderPipelineResources
 
     #region Path Tracing
     [Header("Path Tracing")]
-    [SerializeField, ResourcePath("Assets/Scripts/PathTracing/Shaders/PathTracing.raytrace")]
+    [SerializeField, ResourcePath("Scripts/PathTracing/Shaders/PathTracing.raytrace")]
     private RayTracingShader m_PathTracingRT;
     public RayTracingShader PathTracingRT
     {
@@ -39,7 +39,7 @@ public class RayTracingResources : IRenderPipelineResources
     #endregion
 
     #region ReSTIR
-    [SerializeField, ResourcePath("Assets/Scripts/PathTracing/Shaders/ReSTIR.compute")]
+    [SerializeField, ResourcePath("Scripts/PathTracing/Shaders/ReSTIR.compute")]
     private ComputeShader m_ReSTIRCS;
     public ComputeShader ReSTIRCS
     {
