@@ -137,7 +137,7 @@ void PathTracingRayGenShader()
     float3x3 localToWorld = GetLocalFrame(normalSmoothness.xyz);
     float roughness = 1 - normalSmoothness.w;
     float3 view_tangent = mul(localToWorld, viewWS);
-    float3 F0 = lerp(albedo.xyz, float3(0.04, 0.04, 0.04), specualrMetallic.r);
+    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo.xyz, specualrMetallic.r);
 
     // float3 fresnel = FresnelSchlick(viewWS, normalSmoothness.xyz, F0);
     float3 fresnel = evalFresnelSchlick(F0, float3(1, 1, 1), dot(viewWS, normalSmoothness.xyz));
